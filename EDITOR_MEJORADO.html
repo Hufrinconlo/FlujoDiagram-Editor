@@ -301,6 +301,17 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
 }
 #statusbar b { color: var(--text2); }
 
+/* Multi-selection lasso */
+#lasso {
+  position: absolute; border: 2px solid var(--accent); background: rgba(37,99,235,.08);
+  pointer-events: none; z-index: 50; border-radius: 3px; display: none;
+}
+.fnode.multi-selected .shape rect,
+.fnode.multi-selected .shape polygon,
+.fnode.multi-selected .shape ellipse,
+.fnode.multi-selected .shape path { filter: drop-shadow(0 0 4px rgba(37,99,235,.7)); }
+.fnode.multi-selected { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
 /* Connection label edit */
 .conn-label-input {
   position: absolute; z-index: 50; font-family: 'DM Sans', sans-serif;
@@ -427,9 +438,22 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
 <div id="topbar">
   <div class="logo">⬡ FlujoDiagram</div>
   <div class="tb-sep"></div>
+  <button class="tb-btn" id="btn-undo" onclick="undo()" disabled title="Deshacer (Ctrl+Z)" style="opacity:.4">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg>
+    Deshacer
+  </button>
+  <button class="tb-btn" id="btn-redo" onclick="redo()" disabled title="Rehacer (Ctrl+Y / Ctrl+Shift+Z)" style="opacity:.4">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
+    Rehacer
+  </button>
+  <div class="tb-sep"></div>
   <button class="tb-btn" id="btn-connect" onclick="toggleConnectMode()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M14 7l5 5-5 5"/></svg>
     Conectar
+  </button>
+  <button class="tb-btn" id="btn-sel-all" onclick="selectAll()" title="Seleccionar todas las figuras (Ctrl+A)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    Seleccionar todo
   </button>
   <button class="tb-btn danger" id="btn-del-sel" onclick="deleteSelected()" style="display:none">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
@@ -614,6 +638,11 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
         </div>
         <div class="hint" id="conn-hint">Selecciona una conexión para editarla o eliminarla</div>
         <button class="delbtn" id="del-conn-btn" style="display:none" onclick="deleteSelectedConn()">✕ Eliminar conexión</button>
+        <button id="reset-mid-btn" style="display:none;width:100%;margin-top:6px;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text2);font-family:DM Sans,sans-serif;font-size:12px;font-weight:500;cursor:pointer" onclick="resetMidOffset()" title="Vuelve la línea a su posición automática">↺ Restablecer posición de línea</button>
+        <button id="reset-label-btn" style="display:none;width:100%;margin-top:4px;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text2);font-family:DM Sans,sans-serif;font-size:12px;font-weight:500;cursor:pointer" onclick="resetLabelPos()" title="Vuelve la etiqueta a su posición automática">↺ Restablecer posición de etiqueta</button>
+        <div id="label-drag-hint" style="display:none;font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5;padding:6px 8px;background:var(--bg);border-radius:6px">
+          💡 Arrastra la etiqueta directamente en el canvas para reposicionarla. Doble clic para resetear.
+        </div>
       </div>
     </div>
 
@@ -679,6 +708,7 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
   <!-- CANVAS -->
   <div id="canvas-wrap">
     <div id="canvas">
+      <div id="lasso"></div>
       <svg id="svg-layer">
         <defs id="svg-defs"></defs>
       </svg>
@@ -748,6 +778,15 @@ let selNode=null, selConn=null;
 let connectMode=false, connFrom=null, connFromPort=null;
 let dragData=null;
 
+// ── MULTI-SELECT STATE ──
+let multiSel = new Set(); // set of node ids
+let lassoData = null;     // {sx,sy,ox,oy} - lasso drag start
+
+// ── UNDO/REDO HISTORY ──
+let history = [];
+let historyIndex = -1;
+const MAX_HISTORY = 60;
+
 // Line defaults (applied to new connections)
 let defLineStyle='straight', defLineDash='solid', defArrowEnd='arrow';
 let defLineColor='#64748b', defLineWeight=2;
@@ -761,8 +800,70 @@ function switchTab(t) {
   });
 }
 
+// ── SELECT NODE (helper used by addNode, paste, etc.) ──
+function selectNode(id) {
+  multiSel.clear();
+  selConn = null;
+  selNode = id;
+  nodes.forEach(n => renderNode(n));
+  redrawAll();
+  showNodeProps(id);
+  document.getElementById('btn-del-sel').style.display = '';
+  switchTab('props');
+}
+
+// ── UNDO / REDO ──
+function snapshot() {
+  history = history.slice(0, historyIndex + 1);
+  history.push({
+    nodes: JSON.parse(JSON.stringify(nodes)),
+    conns: JSON.parse(JSON.stringify(conns)),
+    nid, cid
+  });
+  if (history.length > MAX_HISTORY) history.shift();
+  else historyIndex++;
+  updateUndoRedoUI();
+}
+
+function undo() {
+  if (historyIndex <= 0) return;
+  historyIndex--;
+  applyHistory(history[historyIndex]);
+}
+
+function redo() {
+  if (historyIndex >= history.length - 1) return;
+  historyIndex++;
+  applyHistory(history[historyIndex]);
+}
+
+function applyHistory(state) {
+  nodes.forEach(n => { const el=document.getElementById(n.id); if(el) el.remove(); });
+  nodes = JSON.parse(JSON.stringify(state.nodes));
+  conns = JSON.parse(JSON.stringify(state.conns));
+  nid = state.nid; cid = state.cid;
+  selNode = null; selConn = null; multiSel.clear();
+  nodes.forEach(n => renderNode(n));
+  redrawAll(); updateStatus();
+  document.getElementById('no-sel').style.display = '';
+  document.getElementById('props-form').style.display = 'none';
+  document.getElementById('btn-del-sel').style.display = 'none';
+  document.getElementById('del-conn-btn').style.display = 'none';
+  document.getElementById('conn-hint').style.display = '';
+  document.getElementById('conn-label-inp').value = '';
+  updateUndoRedoUI();
+}
+
+function updateUndoRedoUI() {
+  const u = document.getElementById('btn-undo');
+  const r = document.getElementById('btn-redo');
+  if (u) { u.disabled = historyIndex <= 0; u.style.opacity = historyIndex <= 0 ? '.4' : '1'; }
+  if (r) { r.disabled = historyIndex >= history.length - 1; r.style.opacity = historyIndex >= history.length - 1 ? '.4' : '1'; }
+}
+
 // ── ADD NODE ──
 function addNode(shape) {
+  snapshot();
   const id='n'+(++nid);
   const wrap=document.getElementById('canvas-wrap');
   const cx=wrap.scrollLeft+wrap.clientWidth/2;
@@ -802,13 +903,28 @@ function renderNode(n) {
       <div class="rh" data-rdir="s"  data-nid="${n.id}" onmousedown="startResize(event,'${n.id}','s')"></div>
       <div class="rh" data-rdir="n"  data-nid="${n.id}" onmousedown="startResize(event,'${n.id}','n')"></div>`;
     el.addEventListener('mousedown', e => {
-      if (e.target.classList.contains('port') || e.target.classList.contains('dh')) return;
+      if (e.target.classList.contains('port') || e.target.classList.contains('dh') || e.target.classList.contains('rh')) return;
+      // If this node is in multi-selection, allow drag without clearing selection
+      if(multiSel.size > 0 && multiSel.has(n.id)) {
+        startDrag(e, n.id);
+        e.stopPropagation();
+        return;
+      }
       startDrag(e,n.id);
     });
     el.addEventListener('click', e => {
       if (e.target.classList.contains('port') || e.target.classList.contains('dh')) return;
       e.stopPropagation();
-      nodeClicked(n.id);
+      if (e.shiftKey) {
+        // Shift-click: toggle in multi-selection
+        if (multiSel.has(n.id)) { multiSel.delete(n.id); }
+        else { multiSel.add(n.id); if(selNode) { multiSel.add(selNode); selNode=null; } }
+        selConn=null;
+        nodes.forEach(nd=>renderNode(nd));
+        updateMultiSelUI();
+      } else {
+        nodeClicked(n.id, e);
+      }
     });
     document.getElementById('canvas').appendChild(el);
   }
@@ -838,7 +954,8 @@ function renderNode(n) {
   } else if(badge){
     badge.remove();
   }
-  el.classList.toggle('selected',selNode===n.id);
+  el.classList.toggle('selected', selNode===n.id);
+  el.classList.toggle('multi-selected', multiSel.has(n.id) && selNode!==n.id);
 }
 
 // ── TEXT FIT BY SHAPE ──
@@ -922,6 +1039,13 @@ function nodeClicked(id) {
     }
     return;
   }
+  // If clicking a node that's in multi-selection, keep the multi-selection
+  // but set it as the "anchor" for drag. Only clear multi-sel if clicking outside.
+  if (multiSel.size > 0 && multiSel.has(id)) {
+    // Keep multi-sel, just make this the drag anchor (handled in startDrag)
+    return;
+  }
+  multiSel.clear();
   selConn = null;
   selNode = id;
   nodes.forEach(n=>renderNode(n));
@@ -977,12 +1101,18 @@ function removeNormativa(i) {
 
 // Allow Enter key in normativa input
 document.addEventListener('DOMContentLoaded',()=>{
-  setTimeout(loadAutoSave, 200);
+  setTimeout(()=>{
+    loadAutoSave();
+    // Push initial empty state so undo can go back to blank canvas
+    snapshot();
+    updateUndoRedoUI();
+  }, 250);
   document.getElementById('p-norm-inp')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addNormativa();}});
 });
 
 function updateSize() {
   const n=nodes.find(x=>x.id===selNode); if(!n)return;
+  snapshot();
   const w=parseInt(document.getElementById('p-width').value)||n.w;
   const h=parseInt(document.getElementById('p-height').value)||n.h;
   n.w=Math.max(60,w); n.h=Math.max(40,h);
@@ -991,9 +1121,11 @@ function updateSize() {
 
 // ── RESIZE ──
 let resizeData=null;
+let resizeSnapped=false;
 function startResize(e,id,dir) {
   e.stopPropagation(); e.preventDefault();
   const n=nodes.find(x=>x.id===id); if(!n)return;
+  resizeSnapped=false;
   resizeData={id,dir,sx:e.clientX,sy:e.clientY,ox:n.x,oy:n.y,ow:n.w,oh:n.h};
 }
 document.addEventListener('mousemove', e=>{
@@ -1001,6 +1133,7 @@ document.addEventListener('mousemove', e=>{
     const n=nodes.find(x=>x.id===resizeData.id); if(!n)return;
     const dx=e.clientX-resizeData.sx;
     const dy=e.clientY-resizeData.sy;
+    if(!resizeSnapped && (Math.abs(dx)>2||Math.abs(dy)>2)){resizeSnapped=true;snapshot();}
     const d=resizeData.dir;
     let nx=resizeData.ox,ny=resizeData.oy,nw=resizeData.ow,nh=resizeData.oh;
     if(d.includes('e')) nw=Math.max(60,resizeData.ow+dx);
@@ -1023,6 +1156,7 @@ document.addEventListener('mouseup', ()=>{
 function canvasClicked(e) {
   if (e.target===document.getElementById('canvas-wrap') || e.target===document.getElementById('canvas') || e.target===document.getElementById('svg-layer')) {
     if (connFrom) { cancelConn(); return; }
+    multiSel.clear();
     selNode=null; selConn=null;
     nodes.forEach(n=>renderNode(n));
     redrawAll();
@@ -1032,9 +1166,93 @@ function canvasClicked(e) {
     document.getElementById('del-conn-btn').style.display='none';
     document.getElementById('conn-hint').style.display='';
     document.getElementById('conn-label-inp').value='';
+    const rb=document.getElementById('reset-mid-btn'); if(rb) rb.style.display='none';
+    const rl=document.getElementById('reset-label-btn'); if(rl) rl.style.display='none';
+    const lh=document.getElementById('label-drag-hint'); if(lh) lh.style.display='none';
+    updateMultiSelUI();
   }
 }
+
+// ── LASSO (rubber-band selection) ──
+function startLasso(e) {
+  if(connFrom || dragData) return;
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  const ox = e.clientX - rect.left + wrap.scrollLeft;
+  const oy = e.clientY - rect.top + wrap.scrollTop;
+  lassoData = {sx: e.clientX, sy: e.clientY, ox, oy, cx: ox, cy: oy};
+  const lasso = document.getElementById('lasso');
+  lasso.style.display = 'none';
+  if(!e.shiftKey) { multiSel.clear(); selNode=null; nodes.forEach(n=>renderNode(n)); updateMultiSelUI(); }
+}
+
+function updateLasso(e) {
+  if(!lassoData) return;
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  const cx = e.clientX - rect.left + wrap.scrollLeft;
+  const cy = e.clientY - rect.top + wrap.scrollTop;
+  lassoData.cx = cx; lassoData.cy = cy;
+  const x = Math.min(lassoData.ox, cx), y = Math.min(lassoData.oy, cy);
+  const w = Math.abs(cx - lassoData.ox), h = Math.abs(cy - lassoData.oy);
+  if(w < 5 && h < 5) return;
+  const lasso = document.getElementById('lasso');
+  lasso.style.display = 'block';
+  lasso.style.left = x+'px'; lasso.style.top = y+'px';
+  lasso.style.width = w+'px'; lasso.style.height = h+'px';
+  // Live highlight nodes within lasso
+  const x2=x+w, y2=y+h;
+  nodes.forEach(nd=>{
+    const hit = nd.x < x2 && nd.x+nd.w > x && nd.y < y2 && nd.y+nd.h > y;
+    const el = document.getElementById(nd.id);
+    if(el) el.classList.toggle('multi-selected', hit);
+  });
+}
+
+function finishLasso(e) {
+  const lasso = document.getElementById('lasso');
+  lasso.style.display = 'none';
+  if(!lassoData) return;
+  const dx = Math.abs(e.clientX - lassoData.sx), dy = Math.abs(e.clientY - lassoData.sy);
+  if(dx < 5 && dy < 5) return; // tiny drag = normal click, don't steal it
+  const x = Math.min(lassoData.ox, lassoData.cx), y = Math.min(lassoData.oy, lassoData.cy);
+  const x2 = Math.max(lassoData.ox, lassoData.cx), y2 = Math.max(lassoData.oy, lassoData.cy);
+  nodes.forEach(nd=>{
+    if(nd.x < x2 && nd.x+nd.w > x && nd.y < y2 && nd.y+nd.h > y) multiSel.add(nd.id);
+  });
+  selNode=null; selConn=null;
+  nodes.forEach(n=>renderNode(n));
+  updateMultiSelUI();
+}
+
+// ── MULTI-SELECT UI UPDATE ──
+function updateMultiSelUI() {
+  const count = multiSel.size;
+  const delBtn = document.getElementById('btn-del-sel');
+  if(count > 1) {
+    delBtn.style.display='';
+    delBtn.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M3 6h18M19 6l-1 14H6L5 6"/></svg> Eliminar ${count} figuras`;
+    setStatus(`${count} figuras seleccionadas — arrastra cualquiera para moverlas todas`);
+  } else if(count===0 && !selNode) {
+    delBtn.style.display='none';
+  }
+}
+
+// ── SELECT ALL ──
+function selectAll() {
+  if(nodes.length===0) return;
+  multiSel.clear();
+  nodes.forEach(n=>multiSel.add(n.id));
+  selNode=null; selConn=null;
+  nodes.forEach(n=>renderNode(n));
+  redrawAll();
+  updateMultiSelUI();
+}
 document.getElementById('canvas-wrap').addEventListener('click', canvasClicked);
+document.getElementById('canvas-wrap').addEventListener('mousedown', e=>{
+  const isCanvas = e.target===document.getElementById('canvas-wrap') || e.target===document.getElementById('canvas') || e.target===document.getElementById('svg-layer') || e.target===document.getElementById('lasso');
+  if(isCanvas && !connFrom) startLasso(e);
+});
 
 // ── UPDATE PROPS ──
 function updateProp(f,v) {
@@ -1123,15 +1341,31 @@ function setNodeColor(c) {
   activeNodeColor=c;
   document.querySelectorAll('#node-color-row .cdot').forEach(d=>d.classList.toggle('sel',d.dataset.c===c));
   const n=nodes.find(x=>x.id===selNode); if(!n)return;
+  snapshot();
   n.color=c; renderNode(n);
 }
 
 // ── DELETE ──
 function deleteSelected() {
+  if(multiSel.size > 1) {
+    snapshot();
+    const ids = [...multiSel];
+    ids.forEach(id => {
+      nodes = nodes.filter(n=>n.id!==id);
+      conns = conns.filter(c=>c.from!==id && c.to!==id);
+      const el=document.getElementById(id); if(el)el.remove();
+    });
+    multiSel.clear(); selNode=null;
+    document.getElementById('no-sel').style.display='';
+    document.getElementById('props-form').style.display='none';
+    document.getElementById('btn-del-sel').style.display='none';
+    redrawAll(); updateStatus(); autoSave(); return;
+  }
   if(selNode) deleteNodeById(selNode);
   else if(selConn) deleteSelectedConn();
 }
 function deleteNodeById(id) {
+  snapshot();
   nodes=nodes.filter(n=>n.id!==id);
   conns=conns.filter(c=>c.from!==id&&c.to!==id);
   const el=document.getElementById(id); if(el)el.remove();
@@ -1141,6 +1375,7 @@ function deleteNodeById(id) {
 }
 function deleteSelectedConn() {
   if(!selConn)return;
+  snapshot();
   conns=conns.filter(c=>c.id!==selConn);
   selConn=null;
   document.getElementById('del-conn-btn').style.display='none';
@@ -1150,23 +1385,57 @@ function deleteSelectedConn() {
 }
 
 // ── DRAG ──
+let dragSnapped = false; // true once the drag exceeds the threshold and we've taken a snapshot
 function startDrag(e,id) {
   if(connFrom) return;
   const n=nodes.find(x=>x.id===id); if(!n)return;
-  dragData={id,sx:e.clientX,sy:e.clientY,ox:n.x,oy:n.y};
+  dragSnapped = false;
+  // If dragging a node that's part of a multi-selection, move all selected nodes
+  const isMulti = multiSel.size > 0 && multiSel.has(id);
+  if(isMulti) {
+    const origins = {};
+    multiSel.forEach(nid => {
+      const nd = nodes.find(x=>x.id===nid);
+      if(nd) origins[nid] = {ox: nd.x, oy: nd.y};
+    });
+    dragData={id, sx:e.clientX, sy:e.clientY, ox:n.x, oy:n.y, multi:true, origins};
+  } else {
+    dragData={id,sx:e.clientX,sy:e.clientY,ox:n.x,oy:n.y,multi:false};
+  }
   e.preventDefault();
 }
 document.addEventListener('mousemove', e=>{
   if(dragData){
-    const n=nodes.find(x=>x.id===dragData.id); if(!n)return;
-    n.x=Math.max(0,dragData.ox+(e.clientX-dragData.sx));
-    n.y=Math.max(0,dragData.oy+(e.clientY-dragData.sy));
-    renderNode(n); redrawAll();
+    const dx = e.clientX - dragData.sx;
+    const dy = e.clientY - dragData.sy;
+    // Take undo snapshot only on first real movement (>3px threshold)
+    if(!dragSnapped && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+      dragSnapped = true;
+      snapshot();
+    }
+    if(dragData.multi) {
+      // Move all selected nodes
+      multiSel.forEach(nid => {
+        const nd = nodes.find(x=>x.id===nid); if(!nd)return;
+        const orig = dragData.origins[nid]; if(!orig)return;
+        nd.x = Math.max(0, orig.ox + dx);
+        nd.y = Math.max(0, orig.oy + dy);
+        renderNode(nd);
+      });
+      redrawAll();
+    } else {
+      const n=nodes.find(x=>x.id===dragData.id); if(!n)return;
+      n.x=Math.max(0,dragData.ox+dx);
+      n.y=Math.max(0,dragData.oy+dy);
+      renderNode(n); redrawAll();
+    }
   }
   if(connFrom) updateDrawingLine(e);
+  if(lassoData) updateLasso(e);
 });
 document.addEventListener('mouseup', e=>{
-  if(dragData){dragData=null;}
+  if(dragData){dragData=null; autoSave();}
+  if(lassoData){finishLasso(e); lassoData=null;}
 });
 
 // ── CONNECT MODE (port-based) ──
@@ -1184,6 +1453,7 @@ function startConn(e, nid, dir) {
 
 function finishConn(toId, toDir) {
   if(!connFrom||connFrom===toId)return;
+  snapshot();
   const id='c'+(++cid);
   conns.push({
     id, from:connFrom, fromPort:connFromPort,
@@ -1272,27 +1542,27 @@ document.getElementById('canvas').addEventListener('mouseup', e=>{
 function setLineStyle(v) {
   defLineStyle=v;
   document.querySelectorAll('.line-btn[data-ls]').forEach(b=>b.classList.toggle('sel',b.dataset.ls===v));
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.style=v; delete c.midOffset; redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.style=v; delete c.midOffsetX; delete c.midOffsetY; redrawAll();}}
 }
 function setLineDash(v) {
   defLineDash=v;
   document.querySelectorAll('.line-btn[data-ld]').forEach(b=>b.classList.toggle('sel',b.dataset.ld===v));
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.dash=v;redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.dash=v;redrawAll();}}
 }
 function setArrowEnd(v) {
   defArrowEnd=v;
   document.querySelectorAll('.arrow-btn[data-ae]').forEach(b=>b.classList.toggle('sel',b.dataset.ae===v));
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.arrowEnd=v;redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.arrowEnd=v;redrawAll();}}
 }
 function setLineColor(hex,key) {
   defLineColor=hex;
   document.querySelectorAll('#line-color-row .cdot').forEach(d=>d.classList.toggle('sel',d.dataset.lc===key));
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.color=hex;redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.color=hex;redrawAll();}}
 }
 function setLineWeight(v) {
   defLineWeight=parseFloat(v);
   document.getElementById('lw-val').textContent=v+'px';
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.weight=parseFloat(v);redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.weight=parseFloat(v);redrawAll();}}
 }
 function updateConnLabel(v) {
   if(!selConn)return;
@@ -1321,20 +1591,16 @@ function getEndPoint(p1, p2, style, c, fn, tn) {
 
 // Get the direction angle (in radians) of the line arriving at p2
 function arrivalAngle(c, p1, p2) {
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
   if (c.style === 'ortho') {
-    const dx = p2.x - p1.x;
-    const defaultMx = p1.x + dx / 2;
-    const mx = (c.midOffset !== undefined) ? (p1.x + c.midOffset) : defaultMx;
-    // Last segment: horizontal from (mx, p2.y) → (p2.x, p2.y)
-    if (Math.abs(p2.x - mx) > 0.5) return Math.atan2(0, p2.x - mx);
-    return Math.atan2(p2.y - p1.y, 0);
+    // Last segment: (x2, midY) → (x2, y2) — vertical
+    const midY = (c.midOffsetY !== undefined) ? (p1.y + c.midOffsetY) : (p1.y + dy / 2);
+    return Math.atan2(p2.y - midY, 0);
   }
   if (c.style === 'step') {
-    // Last segment: vertical from (p2.x, my) → (p2.x, p2.y)
-    const dy = p2.y - p1.y;
-    const defaultMy = p1.y + dy / 2;
-    const my = (c.midOffset !== undefined) ? (p1.y + c.midOffset) : defaultMy;
-    return Math.atan2(p2.y - my, 0);
+    // Last segment: (midX, y2) → (x2, y2) — horizontal
+    const midX = (c.midOffsetX !== undefined) ? (p1.x + c.midOffsetX) : (p1.x + dx / 2);
+    return Math.atan2(0, p2.x - midX);
   }
   return Math.atan2(p2.y - p1.y, p2.x - p1.x);
 }
@@ -1342,11 +1608,11 @@ function arrivalAngle(c, p1, p2) {
 function departureAngle(c, p1, p2) {
   if (c.style === 'ortho') {
     const dx = p2.x - p1.x;
-    return Math.atan2(0, dx); // horizontal departure
+    return Math.atan2(0, dx); // first segment: horizontal
   }
   if (c.style === 'step') {
     const dy = p2.y - p1.y;
-    return Math.atan2(dy, 0); // vertical departure
+    return Math.atan2(dy, 0); // first segment: vertical
   }
   return Math.atan2(p2.y - p1.y, p2.x - p1.x);
 }
@@ -1426,14 +1692,16 @@ function pathD(c, fn, tn) {
       return {d:`M${x1},${y1} C${cx1},${cy1} ${cx2},${cy2} ${x2},${y2}`,p1,p2};
     }
     case 'ortho': {
-      const defaultMx=x1+dx/2;
-      const mx=(c.midOffset!==undefined)?(x1+c.midOffset):defaultMx;
-      return {d:`M${x1},${y1} L${mx},${y1} L${mx},${y2} L${x2},${y2}`,p1,p2,mx};
+      // 4-segment path with free 2D midpoint: H → V → H → V
+      const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
+      const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
+      return {d:`M${x1},${y1} L${midX},${y1} L${midX},${midY} L${x2},${midY} L${x2},${y2}`,p1,p2,midX,midY};
     }
     case 'step': {
-      const defaultMy=y1+dy/2;
-      const my=(c.midOffset!==undefined)?(y1+c.midOffset):defaultMy;
-      return {d:`M${x1},${y1} L${x1},${my} L${x2},${my} L${x2},${y2}`,p1,p2,my};
+      // 4-segment path with free 2D midpoint: V → H → V → H
+      const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
+      const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
+      return {d:`M${x1},${y1} L${x1},${midY} L${midX},${midY} L${midX},${y2} L${x2},${y2}`,p1,p2,midX,midY};
     }
     default: return {d:`M${x1},${y1} L${x2},${y2}`,p1,p2};
   }
@@ -1463,43 +1731,39 @@ function redrawAll() {
 
     // Arrow size offset so line doesn't poke through arrowhead tip
     const arrowOffset=(c.arrowEnd!=='none'&&c.arrowEnd!=='circle'&&c.arrowEnd!=='diamond-end')?w+6:0;
-    // For step/ortho, shorten along the actual last segment direction, not the diagonal
-    let p2s;
-    if(arrowOffset > 0 && (c.style==='step'||c.style==='ortho')){
-      if(c.style==='step'){
-        // Last segment is vertical: from (p2.x, my) down/up to (p2.x, p2.y)
-        const dy2 = p2.y > p1.y ? -arrowOffset : arrowOffset;
-        p2s = {x: p2.x, y: p2.y + dy2};
-      } else {
-        // ortho: last segment is horizontal: from (mx, p2.y) to (p2.x, p2.y)
-        const dx2 = p2.x > p1.x ? -arrowOffset : arrowOffset;
-        p2s = {x: p2.x + dx2, y: p2.y};
-      }
-    } else {
-      p2s=shortenEnd(p1,p2,arrowOffset);
-    }
-    // Simpler: just rebuild shortened path directly
+
+    // Rebuild shortened path along the ACTUAL last segment for ortho/step
     const dShort = (() => {
-      switch(c.style){
-        case 'curved':{ const cx1=p1.x+(p2.x-p1.x)*0.5,cy1=p1.y,cx2=p2.x-(p2.x-p1.x)*0.5,cy2=p2.y; return `M${p1.x},${p1.y} C${cx1},${cy1} ${cx2},${cy2} ${p2s.x},${p2s.y}`; }
-        case 'ortho':{
-          const defaultMx=p1.x+(p2.x-p1.x)/2;
-          const mx=(c.midOffset!==undefined)?(p1.x+c.midOffset):defaultMx;
-          // Last segment is horizontal: (mx,p2.y) → (p2.x,p2.y)
-          // Shorten only x of last point
-          const endX = p2.x + (p2s.x - p2.x); // = p2s.x
-          return `M${p1.x},${p1.y} L${mx},${p1.y} L${mx},${p2.y} L${endX},${p2.y}`;
-        }
-        case 'step':{
-          const defaultMy=p1.y+(p2.y-p1.y)/2;
-          const my=(c.midOffset!==undefined)?(p1.y+c.midOffset):defaultMy;
-          // Last segment is vertical: (p2.x,my) → (p2.x,p2.y)
-          // Shorten only y of last point
-          const endY = p2.y + (p2s.y - p2.y); // = p2s.y
-          return `M${p1.x},${p1.y} L${p1.x},${my} L${p2.x},${my} L${p2.x},${endY}`;
-        }
-        default: return `M${p1.x},${p1.y} L${p2s.x},${p2s.y}`;
+      const dist = arrowOffset;
+      const dx = p2.x - p1.x, dy = p2.y - p1.y;
+      if(c.style==='ortho'){
+        // 4-segment: p1 → (midX,p1.y) → (midX,midY) → (p2.x,midY) → p2
+        // Last segment is VERTICAL: (p2.x,midY) → (p2.x,p2.y)
+        const midX=(c.midOffsetX!==undefined)?(p1.x+c.midOffsetX):(p1.x+dx/2);
+        const midY=(c.midOffsetY!==undefined)?(p1.y+c.midOffsetY):(p1.y+dy/2);
+        const sign = p2.y >= midY ? 1 : -1;
+        const endY = dist > 0 ? p2.y - sign*dist : p2.y;
+        return `M${p1.x},${p1.y} L${midX},${p1.y} L${midX},${midY} L${p2.x},${midY} L${p2.x},${endY}`;
       }
+      if(c.style==='step'){
+        // 4-segment: p1 → (p1.x,midY) → (midX,midY) → (midX,p2.y) → p2
+        // Last segment is HORIZONTAL: (midX,p2.y) → (p2.x,p2.y)
+        const midX=(c.midOffsetX!==undefined)?(p1.x+c.midOffsetX):(p1.x+dx/2);
+        const midY=(c.midOffsetY!==undefined)?(p1.y+c.midOffsetY):(p1.y+dy/2);
+        const sign = p2.x >= midX ? 1 : -1;
+        const endX = dist > 0 ? p2.x - sign*dist : p2.x;
+        return `M${p1.x},${p1.y} L${p1.x},${midY} L${midX},${midY} L${midX},${p2.y} L${endX},${p2.y}`;
+      }
+      if(c.style==='curved'){
+        const cx1=p1.x+(p2.x-p1.x)*0.5,cy1=p1.y,cx2=p2.x-(p2.x-p1.x)*0.5,cy2=p2.y;
+        if(dist===0) return `M${p1.x},${p1.y} C${cx1},${cy1} ${cx2},${cy2} ${p2.x},${p2.y}`;
+        const p2s=shortenEnd(p1,p2,dist);
+        return `M${p1.x},${p1.y} C${cx1},${cy1} ${cx2},${cy2} ${p2s.x},${p2s.y}`;
+      }
+      // straight
+      if(dist===0) return `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
+      const p2s=shortenEnd(p1,p2,dist);
+      return `M${p1.x},${p1.y} L${p2s.x},${p2s.y}`;
     })();
 
     // Hit area
@@ -1548,40 +1812,57 @@ function redrawAll() {
     if(c.label){
       const fn2=nodes.find(n=>n.id===c.from);
       const tn2=nodes.find(n=>n.id===c.to);
-      const p1=portPos(fn2,c.fromPort||closestPort(fn2,tn2.x+tn2.w/2,tn2.y+tn2.h/2));
-      const p2=portPos(tn2,c.toPort||closestPort(tn2,fn2.x+fn2.w/2,fn2.y+fn2.h/2));
+      const lp1=portPos(fn2,c.fromPort||closestPort(fn2,tn2.x+tn2.w/2,tn2.y+tn2.h/2));
+      const lp2=portPos(tn2,c.toPort||closestPort(tn2,fn2.x+fn2.w/2,fn2.y+fn2.h/2));
 
-      // Place label 25% along path from source, offset 18px perpendicular to direction
-      const t=0.25;
-      let lx, ly;
-      if(c.style==='curved'){
-        const cx1=p1.x+(p2.x-p1.x)*0.5, cy1=p1.y;
-        const cx2=p2.x-(p2.x-p1.x)*0.5, cy2=p2.y;
-        // Bezier point at t
-        lx=Math.pow(1-t,3)*p1.x+3*Math.pow(1-t,2)*t*cx1+3*(1-t)*t*t*cx2+t*t*t*p2.x;
-        ly=Math.pow(1-t,3)*p1.y+3*Math.pow(1-t,2)*t*cx1+3*(1-t)*t*t*cy2+t*t*t*p2.y;
-      } else if(c.style==='ortho'){
-        const mx=p1.x+(p2.x-p1.x)/2;
-        // midpoint of first segment
-        lx=(p1.x+mx)/2; ly=p1.y;
+      // Auto-position: near source, clearly offset to the side of the line
+      let autoX, autoY;
+      const lx1=lp1.x, ly1=lp1.y, lx2=lp2.x, ly2=lp2.y;
+      if(c.style==='ortho'){
+        // First segment is horizontal from p1. Place label on that segment.
+        const midX=(c.midOffsetX!==undefined)?(lx1+c.midOffsetX):(lx1+(lx2-lx1)/2);
+        autoX=(lx1+midX)/2;
+        autoY=ly1;
+        autoY += (ly2 <= ly1 ? 16 : -16);
       } else if(c.style==='step'){
-        const my=p1.y+(p2.y-p1.y)/2;
-        lx=p1.x; ly=(p1.y+my)/2;
+        // First segment is vertical from p1. Place label on that segment.
+        const midY=(c.midOffsetY!==undefined)?(ly1+c.midOffsetY):(ly1+(ly2-ly1)/2);
+        autoX=lx1;
+        autoY=(ly1+midY)/2;
+        autoX += (lx2 >= lx1 ? -20 : 20);
       } else {
-        lx=p1.x+(p2.x-p1.x)*t;
-        ly=p1.y+(p2.y-p1.y)*t;
+        // Straight or curved: place near the start (25%), offset perpendicular
+        autoX=lx1+(lx2-lx1)*0.25;
+        autoY=ly1+(ly2-ly1)*0.25;
+        const ddx=lx2-lx1, ddy=ly2-ly1;
+        const dlen=Math.hypot(ddx,ddy)||1;
+        // Perpendicular direction — always offset 20px
+        const perpX=-ddy/dlen, perpY=ddx/dlen;
+        autoX += perpX*20; autoY += perpY*20;
       }
 
-      // Perpendicular offset: push label 18px away from line
-      const dx=p2.x-p1.x, dy=p2.y-p1.y;
-      const len=Math.hypot(dx,dy)||1;
-      const perpX=-dy/len, perpY=dx/len;
-      // Always offset toward "outside" (positive perp for now, user can flip)
-      const offset=18;
-      lx+=perpX*offset; ly+=perpY*offset;
+      // Apply user drag offset if set
+      const lx = autoX + (c.labelOffsetX||0);
+      const ly = autoY + (c.labelOffsetY||0);
 
       const charW=6.8, pillH=20;
       const pillW=Math.max(32, c.label.length*charW + 20);
+      const isSelConn = selConn===c.id;
+
+      // Hit area for dragging (slightly larger)
+      const hitRect=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      hitRect.classList.add('conn-label');
+      hitRect.setAttribute('x', lx - pillW/2 - 4);
+      hitRect.setAttribute('y', ly - pillH/2 - 4);
+      hitRect.setAttribute('width', pillW + 8);
+      hitRect.setAttribute('height', pillH + 8);
+      hitRect.setAttribute('rx', pillH/2 + 4);
+      hitRect.setAttribute('fill', 'transparent');
+      hitRect.style.cursor='move';
+      hitRect.addEventListener('mousedown', e=>startLabelDrag(e, c.id, autoX, autoY));
+      hitRect.addEventListener('dblclick', e=>{e.stopPropagation(); c.labelOffsetX=0; c.labelOffsetY=0; redrawAll(); autoSave();});
+      svg.appendChild(hitRect);
+
       const pill=document.createElementNS('http://www.w3.org/2000/svg','rect');
       pill.classList.add('conn-label');
       pill.setAttribute('x', lx - pillW/2);
@@ -1590,10 +1871,14 @@ function redrawAll() {
       pill.setAttribute('height', pillH);
       pill.setAttribute('rx', pillH/2);
       pill.setAttribute('fill', '#ffffff');
-      pill.setAttribute('stroke', col);
-      pill.setAttribute('stroke-width', '1.5');
+      pill.setAttribute('stroke', isSelConn ? '#2563eb' : col);
+      pill.setAttribute('stroke-width', isSelConn ? '2' : '1.5');
       pill.setAttribute('filter', 'drop-shadow(0 1px 3px rgba(0,0,0,0.12))');
+      pill.style.cursor='move';
+      pill.addEventListener('mousedown', e=>startLabelDrag(e, c.id, autoX, autoY));
+      pill.addEventListener('dblclick', e=>{e.stopPropagation(); c.labelOffsetX=0; c.labelOffsetY=0; redrawAll(); autoSave();});
       svg.appendChild(pill);
+
       const txt=document.createElementNS('http://www.w3.org/2000/svg','text');
       txt.classList.add('conn-label');
       txt.setAttribute('x', lx);
@@ -1605,8 +1890,21 @@ function redrawAll() {
       txt.setAttribute('font-weight','600');
       txt.setAttribute('fill', col);
       txt.setAttribute('letter-spacing','0.3');
+      txt.setAttribute('pointer-events','none');
       txt.textContent=c.label;
       svg.appendChild(txt);
+
+      // Show reset hint if label has been moved
+      if((c.labelOffsetX||0)!==0||(c.labelOffsetY||0)!==0){
+        const dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
+        dot.classList.add('conn-label');
+        dot.setAttribute('cx', lx + pillW/2 - 3);
+        dot.setAttribute('cy', ly - pillH/2 + 3);
+        dot.setAttribute('r','4');
+        dot.setAttribute('fill','#2563eb');
+        dot.setAttribute('pointer-events','none');
+        svg.appendChild(dot);
+      }
     }
 
     // Midpoint drag handle for step/ortho when selected
@@ -1615,30 +1913,39 @@ function redrawAll() {
       const tn2=nodes.find(n=>n.id===c.to);
       const pp1=portPos(fn2,c.fromPort||closestPort(fn2,tn2.x+tn2.w/2,tn2.y+tn2.h/2));
       const pp2=portPos(tn2,c.toPort||closestPort(tn2,fn2.x+fn2.w/2,fn2.y+fn2.h/2));
-      let hx, hy;
-      if(c.style==='ortho'){
-        const defaultMx=pp1.x+(pp2.x-pp1.x)/2;
-        const mx=(c.midOffset!==undefined)?(pp1.x+c.midOffset):defaultMx;
-        hx=mx; hy=(pp1.y+pp2.y)/2;
-      } else {
-        const defaultMy=pp1.y+(pp2.y-pp1.y)/2;
-        const my=(c.midOffset!==undefined)?(pp1.y+c.midOffset):defaultMy;
-        hx=(pp1.x+pp2.x)/2; hy=my;
-      }
+      const ddx=pp2.x-pp1.x, ddy=pp2.y-pp1.y;
+      const midX=(c.midOffsetX!==undefined)?(pp1.x+c.midOffsetX):(pp1.x+ddx/2);
+      const midY=(c.midOffsetY!==undefined)?(pp1.y+c.midOffsetY):(pp1.y+ddy/2);
+      const hx=midX, hy=midY;
+      // Shadow/glow behind handle for visibility
+      const glow=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      glow.classList.add('conn-path');
+      glow.setAttribute('cx',hx); glow.setAttribute('cy',hy); glow.setAttribute('r',13);
+      glow.setAttribute('fill','rgba(37,99,235,0.12)');glow.setAttribute('stroke','none');
+      glow.style.cursor='move';
+      glow.addEventListener('mousedown',e=>startMidDrag(e,c.id));
+      svg.appendChild(glow);
+      // Main ring
       const ring=document.createElementNS('http://www.w3.org/2000/svg','circle');
       ring.classList.add('conn-path');
-      ring.setAttribute('cx',hx); ring.setAttribute('cy',hy); ring.setAttribute('r',8);
-      ring.setAttribute('fill','#ffffff'); ring.setAttribute('stroke','#2563eb'); ring.setAttribute('stroke-width','1.5');
-      ring.style.cursor=c.style==='ortho'?'ew-resize':'ns-resize';
+      ring.setAttribute('cx',hx); ring.setAttribute('cy',hy); ring.setAttribute('r',9);
+      ring.setAttribute('fill','#ffffff'); ring.setAttribute('stroke','#2563eb'); ring.setAttribute('stroke-width','2');
+      ring.style.cursor='move';
       ring.addEventListener('mousedown',e=>startMidDrag(e,c.id));
       svg.appendChild(ring);
-      const dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
-      dot.classList.add('conn-path');
-      dot.setAttribute('cx',hx); dot.setAttribute('cy',hy); dot.setAttribute('r',3.5);
-      dot.setAttribute('fill','#2563eb');
-      dot.style.cursor=c.style==='ortho'?'ew-resize':'ns-resize';
-      dot.addEventListener('mousedown',e=>startMidDrag(e,c.id));
-      svg.appendChild(dot);
+      // Cross/move indicator
+      const arr=document.createElementNS('http://www.w3.org/2000/svg','text');
+      arr.classList.add('conn-path');
+      arr.setAttribute('x',hx); arr.setAttribute('y',hy);
+      arr.setAttribute('text-anchor','middle'); arr.setAttribute('dominant-baseline','central');
+      arr.setAttribute('font-size','11'); arr.setAttribute('fill','#2563eb');
+      arr.setAttribute('font-weight','700'); arr.setAttribute('pointer-events','none');
+      arr.textContent = '⊕';
+      svg.appendChild(arr);
+      // Double-click to reset midpoint
+      const resetMid = e=>{e.stopPropagation();snapshot();delete c.midOffsetX;delete c.midOffsetY;redrawAll();autoSave();};
+      ring.addEventListener('dblclick', resetMid);
+      glow.addEventListener('dblclick', resetMid);
     }
   });
 }
@@ -1653,20 +1960,15 @@ function startMidDrag(e, connId) {
   const tn=nodes.find(n=>n.id===c.to);
   const p1=portPos(fn,c.fromPort||closestPort(fn,tn.x+tn.w/2,tn.y+tn.h/2));
   const p2=portPos(tn,c.toPort||closestPort(tn,fn.x+fn.w/2,fn.y+fn.h/2));
+  const dx=p2.x-p1.x, dy=p2.y-p1.y;
   const wrap=document.getElementById('canvas-wrap');
   const rect=wrap.getBoundingClientRect();
-  const mx=e.clientX-rect.left+wrap.scrollLeft;
-  const my=e.clientY-rect.top+wrap.scrollTop;
-  // current offset from p1
-  let currentOffset;
-  if(c.style==='ortho'){
-    const defaultMx=p1.x+(p2.x-p1.x)/2;
-    currentOffset=(c.midOffset!==undefined)?c.midOffset:(defaultMx-p1.x);
-  } else {
-    const defaultMy=p1.y+(p2.y-p1.y)/2;
-    currentOffset=(c.midOffset!==undefined)?c.midOffset:(defaultMy-p1.y);
-  }
-  midDragData={connId, startMouse: c.style==='ortho'?mx:my, startOffset:currentOffset, style:c.style};
+  const startMx=e.clientX-rect.left+wrap.scrollLeft;
+  const startMy=e.clientY-rect.top+wrap.scrollTop;
+  const curOffX=(c.midOffsetX!==undefined)?c.midOffsetX:(dx/2);
+  const curOffY=(c.midOffsetY!==undefined)?c.midOffsetY:(dy/2);
+  snapshot();
+  midDragData={connId, startMx, startMy, curOffX, curOffY};
 }
 
 document.addEventListener('mousemove', e=>{
@@ -1674,20 +1976,54 @@ document.addEventListener('mousemove', e=>{
   const c=conns.find(x=>x.id===midDragData.connId); if(!c) return;
   const wrap=document.getElementById('canvas-wrap');
   const rect=wrap.getBoundingClientRect();
-  if(midDragData.style==='ortho'){
-    const mx=e.clientX-rect.left+wrap.scrollLeft;
-    const delta=mx-midDragData.startMouse;
-    c.midOffset=midDragData.startOffset+delta;
-  } else {
-    const my=e.clientY-rect.top+wrap.scrollTop;
-    const delta=my-midDragData.startMouse;
-    c.midOffset=midDragData.startOffset+delta;
-  }
+  const mx=e.clientX-rect.left+wrap.scrollLeft;
+  const my=e.clientY-rect.top+wrap.scrollTop;
+  c.midOffsetX = midDragData.curOffX + (mx - midDragData.startMx);
+  c.midOffsetY = midDragData.curOffY + (my - midDragData.startMy);
   redrawAll();
 });
 
 document.addEventListener('mouseup', ()=>{
   if(midDragData){ midDragData=null; autoSave(); }
+});
+
+// ── LABEL DRAG ──
+let labelDragData = null;
+
+function startLabelDrag(e, connId, autoX, autoY) {
+  e.stopPropagation(); e.preventDefault();
+  const c=conns.find(x=>x.id===connId); if(!c||!c.label) return;
+  const wrap=document.getElementById('canvas-wrap');
+  const rect=wrap.getBoundingClientRect();
+  const mx=e.clientX-rect.left+wrap.scrollLeft;
+  const my=e.clientY-rect.top+wrap.scrollTop;
+  labelDragData={
+    connId,
+    startMx: mx, startMy: my,
+    startOffX: c.labelOffsetX||0,
+    startOffY: c.labelOffsetY||0
+  };
+}
+
+document.addEventListener('mousemove', e=>{
+  if(!labelDragData) return;
+  const c=conns.find(x=>x.id===labelDragData.connId); if(!c) return;
+  const wrap=document.getElementById('canvas-wrap');
+  const rect=wrap.getBoundingClientRect();
+  const mx=e.clientX-rect.left+wrap.scrollLeft;
+  const my=e.clientY-rect.top+wrap.scrollTop;
+  c.labelOffsetX = labelDragData.startOffX + (mx - labelDragData.startMx);
+  c.labelOffsetY = labelDragData.startOffY + (my - labelDragData.startMy);
+  redrawAll();
+});
+
+document.addEventListener('mouseup', ()=>{
+  if(labelDragData){
+    labelDragData=null;
+    autoSave();
+    // Show reset button now that label has been moved
+    const rl=document.getElementById('reset-label-btn'); if(rl) rl.style.display='';
+  }
 });
 
 // ── SELECT CONNECTION ──
@@ -1700,6 +2036,29 @@ function selectConn(id) {
   document.getElementById('del-conn-btn').style.display='';
   document.getElementById('conn-label-inp').value=c.label||'';
   document.getElementById('btn-del-sel').style.display='';
+  // Show reset-mid button for step/ortho
+  const resetBtn=document.getElementById('reset-mid-btn');
+  if(c.style==='step'||c.style==='ortho'){
+    resetBtn.style.display='';
+    const hasMid = (c.midOffsetX!==undefined)||(c.midOffsetY!==undefined);
+    resetBtn.textContent=(hasMid?'↺ Restablecer posición de línea':'⊕ Arrastra el handle para ajustar la línea');
+  } else {
+    resetBtn.style.display='none';
+  }
+  // Show label controls if conn has a label
+  const resetLbl=document.getElementById('reset-label-btn');
+  const lhint=document.getElementById('label-drag-hint');
+  if(c.label){
+    lhint.style.display='';
+    if((c.labelOffsetX||0)!==0||(c.labelOffsetY||0)!==0){
+      resetLbl.style.display='';
+    } else {
+      resetLbl.style.display='none';
+    }
+  } else {
+    resetLbl.style.display='none';
+    lhint.style.display='none';
+  }
   // Sync line style UI
   document.querySelectorAll('.line-btn[data-ls]').forEach(b=>b.classList.toggle('sel',b.dataset.ls===c.style));
   document.querySelectorAll('.line-btn[data-ld]').forEach(b=>b.classList.toggle('sel',b.dataset.ld===c.dash));
@@ -1707,6 +2066,23 @@ function selectConn(id) {
   document.getElementById('line-weight').value=c.weight;
   document.getElementById('lw-val').textContent=c.weight+'px';
   switchTab('lines');
+}
+
+function resetMidOffset() {
+  if(!selConn) return;
+  const c=conns.find(x=>x.id===selConn); if(!c)return;
+  snapshot();
+  delete c.midOffsetX; delete c.midOffsetY;
+  redrawAll(); autoSave();
+  document.getElementById('reset-mid-btn').textContent='⊕ Arrastra el handle para ajustar la línea';
+}
+
+function resetLabelPos() {
+  if(!selConn) return;
+  const c=conns.find(x=>x.id===selConn); if(!c)return;
+  c.labelOffsetX=0; c.labelOffsetY=0;
+  redrawAll(); autoSave();
+  document.getElementById('reset-label-btn').style.display='none';
 }
 
 // ── ICON INSERTION ──
@@ -1825,6 +2201,7 @@ function copySelected() {
 
 function pasteClipboard() {
   if(!clipboard) return;
+  snapshot();
   const id = 'n'+(++nid);
   const offset = 28; // pixels to offset so paste is visible
   const n = {...JSON.parse(JSON.stringify(clipboard)), id,
@@ -1844,13 +2221,17 @@ function duplicateSelected() {
 }
 
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){closeModal();cancelConn();}
+  if(e.key==='Escape'){closeModal();cancelConn(); multiSel.clear(); nodes.forEach(n=>renderNode(n)); updateMultiSelUI();}
   const inInput = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
   if((e.key==='Delete'||e.key==='Backspace')&&!inInput){
-    if(selNode)deleteNodeById(selNode);
+    if(multiSel.size>1) deleteSelected();
+    else if(selNode)deleteNodeById(selNode);
     else if(selConn)deleteSelectedConn();
   }
   const mod = e.ctrlKey||e.metaKey;
+  if(mod && e.key.toLowerCase()==='z' && !e.shiftKey && !inInput){ e.preventDefault(); undo(); }
+  if(mod && (e.key.toLowerCase()==='y' || (e.key.toLowerCase()==='z' && e.shiftKey)) && !inInput){ e.preventDefault(); redo(); }
+  if(mod && e.key.toLowerCase()==='a' && !inInput){ e.preventDefault(); selectAll(); }
   if(mod && e.key.toLowerCase()==='c' && !inInput){ e.preventDefault(); copySelected(); }
   if(mod && e.key.toLowerCase()==='v' && !inInput){ e.preventDefault(); pasteClipboard(); }
   if(mod && e.key.toLowerCase()==='d' && !inInput){ e.preventDefault(); duplicateSelected(); }
@@ -1863,7 +2244,7 @@ document.getElementById('canvas').addEventListener('dblclick',e=>{
 });
 
 // ── MISC ──
-function clearAll(){if(!confirm('¿Eliminar todo?'))return;nodes.forEach(n=>{const el=document.getElementById(n.id);if(el)el.remove();});nodes=[];conns=[];selNode=null;selConn=null;redrawAll();updateStatus();autoSave();}
+function clearAll(){if(!confirm('¿Eliminar todo?'))return;snapshot();nodes.forEach(n=>{const el=document.getElementById(n.id);if(el)el.remove();});nodes=[];conns=[];selNode=null;selConn=null;redrawAll();updateStatus();autoSave();}
 
 // ── AUTOSAVE ──
 const SAVE_KEY = 'flujodiagram_autosave';
@@ -1912,10 +2293,19 @@ function restoreState(data) {
   conns = data.conns || [];
   nid   = data.nid   || nodes.length;
   cid   = data.cid   || conns.length;
+  // Migrate old midOffset to new midOffsetX/midOffsetY
+  conns.forEach(c => {
+    if (c.midOffset !== undefined) {
+      if (c.style === 'ortho') { c.midOffsetX = c.midOffset; }
+      else if (c.style === 'step') { c.midOffsetY = c.midOffset; }
+      delete c.midOffset;
+    }
+  });
   selNode = null; selConn = null;
   nodes.forEach(n => renderNode(n));
   redrawAll();
   updateStatus();
+  snapshot(); updateUndoRedoUI();
   const ts = data.ts ? new Date(data.ts).toLocaleString('es') : '\u2014';
   setSaveStatus('Restaurado: ' + ts, '#2563eb');
 }
@@ -2003,17 +2393,60 @@ function drawArrow(svg,type,px,py,angle,col,w){
     el.setAttribute('stroke-width',Math.max(1.2,w*.7));svg.appendChild(el);
   }
 }
+/* Arrival angle: direction of the LAST segment of the path */
 function arrAngle(c,p1,p2){
-  if(c.style==='ortho'){const dx=p2.x-p1.x,dy=p2.y-p1.y,mx=p1.x+dx/2;if(Math.abs(p2.x-mx)>.5)return Math.atan2(0,p2.x-mx);return Math.atan2(dy,0);}
-  if(c.style==='step'){const dy=p2.y-p1.y,my=p1.y+dy/2;if(Math.abs(p2.y-my)>.5)return Math.atan2(p2.y-my,0);return Math.atan2(0,p2.x-p1.x);}
+  const dx=p2.x-p1.x,dy=p2.y-p1.y;
+  if(c.style==='ortho'){
+    // Last segment is VERTICAL: (x2,midY)→(x2,y2)
+    const midY=(c.midOffsetY!==undefined)?(p1.y+c.midOffsetY):(p1.y+dy/2);
+    return Math.atan2(p2.y-midY,0);
+  }
+  if(c.style==='step'){
+    // Last segment is HORIZONTAL: (midX,y2)→(x2,y2)
+    const midX=(c.midOffsetX!==undefined)?(p1.x+c.midOffsetX):(p1.x+dx/2);
+    return Math.atan2(0,p2.x-midX);
+  }
   return Math.atan2(p2.y-p1.y,p2.x-p1.x);
 }
-function sEnd(p1,p2,dist){const dx=p2.x-p1.x,dy=p2.y-p1.y,len=Math.hypot(dx,dy);if(len<dist+1)return p2;return{x:p2.x-dx/len*dist,y:p2.y-dy/len*dist};}
-function pD2(c,p1,p2){const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y,dx=x2-x1,dy=y2-y1;
+/* Build full path string (4-segment ortho/step with free midpoint) */
+function pD2(c,p1,p2){
+  const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y,dx=x2-x1,dy=y2-y1;
   if(c.style==='curved')return 'M'+x1+','+y1+' C'+(x1+dx*.5)+','+y1+' '+(x2-dx*.5)+','+y2+' '+x2+','+y2;
-  if(c.style==='ortho'){const mx=x1+dx/2;return 'M'+x1+','+y1+' L'+mx+','+y1+' L'+mx+','+y2+' L'+x2+','+y2;}
-  if(c.style==='step'){const my=y1+dy/2;return 'M'+x1+','+y1+' L'+x1+','+my+' L'+x2+','+my+' L'+x2+','+y2;}
+  if(c.style==='ortho'){
+    const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
+    const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
+    return 'M'+x1+','+y1+' L'+midX+','+y1+' L'+midX+','+midY+' L'+x2+','+midY+' L'+x2+','+y2;
+  }
+  if(c.style==='step'){
+    const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
+    const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
+    return 'M'+x1+','+y1+' L'+x1+','+midY+' L'+midX+','+midY+' L'+midX+','+y2+' L'+x2+','+y2;
+  }
   return 'M'+x1+','+y1+' L'+x2+','+y2;
+}
+/* Shorten path end along the actual LAST segment direction */
+function pD2Short(c,p1,p2,dist){
+  const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y,dx=x2-x1,dy=y2-y1;
+  if(c.style==='ortho'){
+    const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
+    const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
+    // Last segment VERTICAL: shorten y
+    const sign=y2>=midY?1:-1;
+    return 'M'+x1+','+y1+' L'+midX+','+y1+' L'+midX+','+midY+' L'+x2+','+midY+' L'+x2+','+(y2-sign*dist);
+  }
+  if(c.style==='step'){
+    const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
+    const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
+    // Last segment HORIZONTAL: shorten x
+    const sign=x2>=midX?1:-1;
+    return 'M'+x1+','+y1+' L'+x1+','+midY+' L'+midX+','+midY+' L'+midX+','+y2+' L'+(x2-sign*dist)+','+y2;
+  }
+  if(c.style==='curved'){
+    const len=Math.hypot(dx,dy);if(len<dist+1)return pD2(c,p1,p2);
+    return 'M'+x1+','+y1+' C'+(x1+dx*.5)+','+y1+' '+(x2-dx*.5)+','+y2+' '+(x2-dx/len*dist)+','+(y2-dy/len*dist);
+  }
+  const len=Math.hypot(dx,dy);if(len<dist+1)return pD2(c,p1,p2);
+  return 'M'+x1+','+y1+' L'+(x2-dx/len*dist)+','+(y2-dy/len*dist);
 }`;
 
   // dur badge renderer
@@ -2217,9 +2650,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       const p1=pP(fn,c.fromPort||'right'),p2=pP(tn,c.toPort||'left');
       const ang=arrAngle(c,p1,p2);
       const off=(c.arrowEnd!=='none'&&c.arrowEnd!=='circle'&&c.arrowEnd!=='diamond-end')?w+6:0;
-      const p2s=sEnd(p1,p2,off);
-      const dShort=pD2(c,p1,p2s);
       const dFull=pD2(c,p1,p2);
+      const dShort=off>0?pD2Short(c,p1,p2,off):dFull;
       const path=document.createElementNS('http://www.w3.org/2000/svg','path');
       path.setAttribute('d',c.arrowEnd!=='none'?dShort:dFull);
       path.setAttribute('fill','none');path.setAttribute('stroke',col);path.setAttribute('stroke-width',w);
@@ -2228,17 +2660,28 @@ window.addEventListener('DOMContentLoaded',()=>{
       if(c.arrowEnd!=='none')drawArrow(svg,c.arrowEnd==='both'?'arrow':c.arrowEnd,p2.x,p2.y,ang,col,w);
       if(c.arrowEnd==='both')drawArrow(svg,'arrow',p1.x,p1.y,ang+Math.PI,col,w);
       if(c.label){
-        const lx=(p1.x+p2.x)/2,ly=(p1.y+p2.y)/2;
-        const dx2=p2.x-p1.x,dy2=p2.y-p1.y,len=Math.hypot(dx2,dy2)||1;
-        const px=lx+(-dy2/len)*18,py=ly+(dx2/len)*18;
+        const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y;
+        let autoX,autoY;
+        if(c.style==='ortho'){
+          const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+(x2-x1)/2);
+          autoX=(x1+midX)/2; autoY=y1+(y2<=y1?16:-16);
+        }else if(c.style==='step'){
+          const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+(y2-y1)/2);
+          autoX=x1+(x2>=x1?-20:20); autoY=(y1+midY)/2;
+        }else{
+          autoX=x1+(x2-x1)*.25; autoY=y1+(y2-y1)*.25;
+          const dl=Math.hypot(x2-x1,y2-y1)||1;
+          autoX+=(-(y2-y1)/dl)*20; autoY+=((x2-x1)/dl)*20;
+        }
+        const lx=autoX+(c.labelOffsetX||0), ly=autoY+(c.labelOffsetY||0);
         const pw=Math.max(32,c.label.length*6.8+20),ph=20;
         const bg=document.createElementNS('http://www.w3.org/2000/svg','rect');
-        bg.setAttribute('x',px-pw/2);bg.setAttribute('y',py-ph/2);
+        bg.setAttribute('x',lx-pw/2);bg.setAttribute('y',ly-ph/2);
         bg.setAttribute('width',pw);bg.setAttribute('height',ph);bg.setAttribute('rx',ph/2);
         bg.setAttribute('fill','#fff');bg.setAttribute('stroke',col);bg.setAttribute('stroke-width','1.5');
         bg.setAttribute('filter','drop-shadow(0 1px 3px rgba(0,0,0,0.12))');svg.appendChild(bg);
         const tx=document.createElementNS('http://www.w3.org/2000/svg','text');
-        tx.setAttribute('x',px);tx.setAttribute('y',py);tx.setAttribute('text-anchor','middle');
+        tx.setAttribute('x',lx);tx.setAttribute('y',ly);tx.setAttribute('text-anchor','middle');
         tx.setAttribute('dominant-baseline','central');tx.setAttribute('font-family','system-ui,sans-serif');
         tx.setAttribute('font-size','11');tx.setAttribute('font-weight','600');tx.setAttribute('fill',col);
         tx.textContent=c.label;svg.appendChild(tx);
