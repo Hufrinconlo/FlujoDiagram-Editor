@@ -150,7 +150,8 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
     linear-gradient(to bottom, #e8e6e0 1px, transparent 1px);
   background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
 }
-#canvas { position: relative; width: 5000px; height: 3500px; }
+#canvas-sizer { position: relative; width: 5000px; height: 3500px; overflow: hidden; }
+#canvas { position: absolute; top: 0; left: 0; width: 5000px; height: 3500px; transform-origin: 0 0; }
 #svg-layer {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   z-index: 1; overflow: visible;
@@ -543,7 +544,7 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
     <div id="panel-lines" style="display:none">
       <div class="sb-sec">
         <div class="sb-lbl">Tipo de línea</div>
-        <div class="line-grid">
+        <div class="line-grid" style="grid-template-columns:1fr 1fr 1fr">
           <button class="line-btn sel" data-ls="straight" onclick="setLineStyle('straight')">
             <svg viewBox="0 0 52 18"><line x1="4" y1="9" x2="48" y2="9" stroke="#2563eb" stroke-width="2" marker-end="url(#lp)"/><defs><marker id="lp" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1 2L8 5L1 8" fill="none" stroke="#2563eb" stroke-width="1.5"/></marker></defs></svg>
             Recta
@@ -553,12 +554,8 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
             Curva
           </button>
           <button class="line-btn" data-ls="ortho" onclick="setLineStyle('ortho')">
-            <svg viewBox="0 0 52 18"><polyline points="4,14 4,6 48,6 48,14" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#lp3)"/><defs><marker id="lp3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1 2L8 5L1 8" fill="none" stroke="#2563eb" stroke-width="1.5"/></marker></defs></svg>
-            En ángulo
-          </button>
-          <button class="line-btn" data-ls="step" onclick="setLineStyle('step')">
-            <svg viewBox="0 0 52 18"><polyline points="4,14 26,14 26,4 48,4" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#lp4)"/><defs><marker id="lp4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1 2L8 5L1 8" fill="none" stroke="#2563eb" stroke-width="1.5"/></marker></defs></svg>
-            Escalón
+            <svg viewBox="0 0 52 18"><polyline points="4,14 4,9 28,9 28,4 48,4" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#lp3)"/><defs><marker id="lp3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1 2L8 5L1 8" fill="none" stroke="#2563eb" stroke-width="1.5"/></marker></defs></svg>
+            Ortogonal
           </button>
         </div>
       </div>
@@ -707,11 +704,13 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
 
   <!-- CANVAS -->
   <div id="canvas-wrap">
-    <div id="canvas">
-      <div id="lasso"></div>
-      <svg id="svg-layer">
-        <defs id="svg-defs"></defs>
-      </svg>
+    <div id="canvas-sizer">
+      <div id="canvas">
+        <div id="lasso"></div>
+        <svg id="svg-layer">
+          <defs id="svg-defs"></defs>
+        </svg>
+      </div>
     </div>
   </div>
 </div>
@@ -725,6 +724,7 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
   </span>
   <span id="st-msg">Agrega figuras y usa los puertos azules para conectarlas</span>
   <span class="spacer"></span>
+  <span id="st-zoom" title="Zoom — rueda del ratón para cambiar, Ctrl+0 para resetear" style="cursor:pointer;font-size:11px;color:var(--text3);min-width:36px;text-align:right" onclick="applyZoom(1,document.getElementById('canvas-wrap').clientWidth/2,document.getElementById('canvas-wrap').clientHeight/2)">100%</span>
   <span id="st-save" style="display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--text3)">
     <svg id="st-save-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
     <span id="st-save-txt">Sin cambios</span>
@@ -781,6 +781,27 @@ let dragData=null;
 // ── MULTI-SELECT STATE ──
 let multiSel = new Set(); // set of node ids
 let lassoData = null;     // {sx,sy,ox,oy} - lasso drag start
+let lassoJustCompleted = false; // prevents canvasClicked from clearing selection after lasso
+
+// ── ZOOM ──
+let zoom = 1;
+const ZOOM_MIN = 0.15, ZOOM_MAX = 4;
+
+function applyZoom(newZoom, focalX, focalY) {
+  const wrap = document.getElementById('canvas-wrap');
+  const canvasX = (wrap.scrollLeft + focalX) / zoom;
+  const canvasY = (wrap.scrollTop  + focalY) / zoom;
+  zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
+  document.getElementById('canvas').style.transform = `scale(${zoom})`;
+  const sizer = document.getElementById('canvas-sizer');
+  sizer.style.width  = (5000 * zoom) + 'px';
+  sizer.style.height = (3500 * zoom) + 'px';
+  wrap.scrollLeft = canvasX * zoom - focalX;
+  wrap.scrollTop  = canvasY * zoom - focalY;
+  const zd = document.getElementById('st-zoom');
+  if (zd) zd.textContent = Math.round(zoom * 100) + '%';
+  updateMinimap();
+}
 
 // ── UNDO/REDO HISTORY ──
 let history = [];
@@ -866,8 +887,8 @@ function addNode(shape) {
   snapshot();
   const id='n'+(++nid);
   const wrap=document.getElementById('canvas-wrap');
-  const cx=wrap.scrollLeft+wrap.clientWidth/2;
-  const cy=wrap.scrollTop+wrap.clientHeight/2;
+  const cx=(wrap.scrollLeft+wrap.clientWidth/2)/zoom;
+  const cy=(wrap.scrollTop+wrap.clientHeight/2)/zoom;
   const d=SDEFS[shape];
   const n={id,shape,color:activeNodeColor,x:Math.max(20,cx-d.w/2+(Math.random()-.5)*80),y:Math.max(20,cy-d.h/2+(Math.random()-.5)*80),w:d.w,h:d.h,title:shapeName(shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min'};
   nodes.push(n);
@@ -903,6 +924,7 @@ function renderNode(n) {
       <div class="rh" data-rdir="s"  data-nid="${n.id}" onmousedown="startResize(event,'${n.id}','s')"></div>
       <div class="rh" data-rdir="n"  data-nid="${n.id}" onmousedown="startResize(event,'${n.id}','n')"></div>`;
     el.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
       if (e.target.classList.contains('port') || e.target.classList.contains('dh') || e.target.classList.contains('rh')) return;
       // If this node is in multi-selection, allow drag without clearing selection
       if(multiSel.size > 0 && multiSel.has(n.id)) {
@@ -1131,8 +1153,8 @@ function startResize(e,id,dir) {
 document.addEventListener('mousemove', e=>{
   if(resizeData){
     const n=nodes.find(x=>x.id===resizeData.id); if(!n)return;
-    const dx=e.clientX-resizeData.sx;
-    const dy=e.clientY-resizeData.sy;
+    const dx=(e.clientX-resizeData.sx)/zoom;
+    const dy=(e.clientY-resizeData.sy)/zoom;
     if(!resizeSnapped && (Math.abs(dx)>2||Math.abs(dy)>2)){resizeSnapped=true;snapshot();}
     const d=resizeData.dir;
     let nx=resizeData.ox,ny=resizeData.oy,nw=resizeData.ow,nh=resizeData.oh;
@@ -1154,6 +1176,7 @@ document.addEventListener('mouseup', ()=>{
 }, true);
 
 function canvasClicked(e) {
+  if(lassoJustCompleted) { lassoJustCompleted = false; return; }
   if (e.target===document.getElementById('canvas-wrap') || e.target===document.getElementById('canvas') || e.target===document.getElementById('svg-layer')) {
     if (connFrom) { cancelConn(); return; }
     multiSel.clear();
@@ -1178,8 +1201,8 @@ function startLasso(e) {
   if(connFrom || dragData) return;
   const wrap = document.getElementById('canvas-wrap');
   const rect = wrap.getBoundingClientRect();
-  const ox = e.clientX - rect.left + wrap.scrollLeft;
-  const oy = e.clientY - rect.top + wrap.scrollTop;
+  const ox = (e.clientX - rect.left + wrap.scrollLeft) / zoom;
+  const oy = (e.clientY - rect.top  + wrap.scrollTop)  / zoom;
   lassoData = {sx: e.clientX, sy: e.clientY, ox, oy, cx: ox, cy: oy};
   const lasso = document.getElementById('lasso');
   lasso.style.display = 'none';
@@ -1190,8 +1213,8 @@ function updateLasso(e) {
   if(!lassoData) return;
   const wrap = document.getElementById('canvas-wrap');
   const rect = wrap.getBoundingClientRect();
-  const cx = e.clientX - rect.left + wrap.scrollLeft;
-  const cy = e.clientY - rect.top + wrap.scrollTop;
+  const cx = (e.clientX - rect.left + wrap.scrollLeft) / zoom;
+  const cy = (e.clientY - rect.top  + wrap.scrollTop)  / zoom;
   lassoData.cx = cx; lassoData.cy = cy;
   const x = Math.min(lassoData.ox, cx), y = Math.min(lassoData.oy, cy);
   const w = Math.abs(cx - lassoData.ox), h = Math.abs(cy - lassoData.oy);
@@ -1223,6 +1246,7 @@ function finishLasso(e) {
   selNode=null; selConn=null;
   nodes.forEach(n=>renderNode(n));
   updateMultiSelUI();
+  lassoJustCompleted = true; // block the following click event from clearing the selection
 }
 
 // ── MULTI-SELECT UI UPDATE ──
@@ -1250,9 +1274,20 @@ function selectAll() {
 }
 document.getElementById('canvas-wrap').addEventListener('click', canvasClicked);
 document.getElementById('canvas-wrap').addEventListener('mousedown', e=>{
+  if(e.button !== 0) return;
   const isCanvas = e.target===document.getElementById('canvas-wrap') || e.target===document.getElementById('canvas') || e.target===document.getElementById('svg-layer') || e.target===document.getElementById('lasso');
   if(isCanvas && !connFrom) startLasso(e);
 });
+
+document.getElementById('canvas-wrap').addEventListener('wheel', e=>{
+  e.preventDefault();
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  const focalX = e.clientX - rect.left;
+  const focalY = e.clientY - rect.top;
+  const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+  applyZoom(zoom * factor, focalX, focalY);
+}, { passive: false });
 
 // ── UPDATE PROPS ──
 function updateProp(f,v) {
@@ -1317,10 +1352,10 @@ function updateMinimapViewport() {
   const wrap=document.getElementById('canvas-wrap');
   const vp=document.getElementById('minimap-viewport');
   const sx=MM_W/CANVAS_W, sy=MM_H/CANVAS_H;
-  const vw=Math.min(MM_W,wrap.clientWidth*sx);
-  const vh=Math.min(MM_H,wrap.clientHeight*sy);
-  const vx=wrap.scrollLeft*sx;
-  const vy=wrap.scrollTop*sy;
+  const vw=Math.min(MM_W,(wrap.clientWidth/zoom)*sx);
+  const vh=Math.min(MM_H,(wrap.clientHeight/zoom)*sy);
+  const vx=(wrap.scrollLeft/zoom)*sx;
+  const vy=(wrap.scrollTop/zoom)*sy;
   vp.style.cssText=`left:${vx}px;top:${vy}px;width:${vw}px;height:${vh}px`;
 }
 
@@ -1329,8 +1364,8 @@ function minimapClick(e) {
   const rx=(e.clientX-rect.left)/MM_W;
   const ry=(e.clientY-rect.top)/MM_H;
   const wrap=document.getElementById('canvas-wrap');
-  wrap.scrollLeft=rx*CANVAS_W - wrap.clientWidth/2;
-  wrap.scrollTop=ry*CANVAS_H - wrap.clientHeight/2;
+  wrap.scrollLeft=rx*CANVAS_W*zoom - wrap.clientWidth/2;
+  wrap.scrollTop=ry*CANVAS_H*zoom - wrap.clientHeight/2;
 }
 
 document.getElementById('canvas-wrap').addEventListener('scroll',()=>{
@@ -1404,10 +1439,28 @@ function startDrag(e,id) {
   }
   e.preventDefault();
 }
+// ── RIGHT-CLICK PAN ──
+let panData = null;
+
+document.getElementById('canvas-wrap').addEventListener('mousedown', e=>{
+  if(e.button !== 2) return;
+  const wrap = document.getElementById('canvas-wrap');
+  panData = {sx: e.clientX, sy: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop};
+  wrap.style.cursor = 'grabbing';
+  e.preventDefault();
+});
+
 document.addEventListener('mousemove', e=>{
+  if(panData){
+    e.preventDefault();
+    const wrap = document.getElementById('canvas-wrap');
+    wrap.scrollLeft = panData.sl - (e.clientX - panData.sx);
+    wrap.scrollTop  = panData.st - (e.clientY - panData.sy);
+    return;
+  }
   if(dragData){
-    const dx = e.clientX - dragData.sx;
-    const dy = e.clientY - dragData.sy;
+    const dx = (e.clientX - dragData.sx) / zoom;
+    const dy = (e.clientY - dragData.sy) / zoom;
     // Take undo snapshot only on first real movement (>3px threshold)
     if(!dragSnapped && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
       dragSnapped = true;
@@ -1434,8 +1487,13 @@ document.addEventListener('mousemove', e=>{
   if(lassoData) updateLasso(e);
 });
 document.addEventListener('mouseup', e=>{
+  if(panData){ panData=null; document.getElementById('canvas-wrap').style.cursor=''; }
   if(dragData){dragData=null; autoSave();}
   if(lassoData){finishLasso(e); lassoData=null;}
+});
+
+document.getElementById('canvas-wrap').addEventListener('contextmenu', e=>{
+  e.preventDefault();
 });
 
 // ── CONNECT MODE (port-based) ──
@@ -1501,8 +1559,8 @@ function updateDrawingLine(e) {
   if(!drawingLine||!connFrom)return;
   const wrap=document.getElementById('canvas-wrap');
   const rect=wrap.getBoundingClientRect();
-  const x=e.clientX-rect.left+wrap.scrollLeft;
-  const y=e.clientY-rect.top+wrap.scrollTop;
+  const x=(e.clientX-rect.left+wrap.scrollLeft)/zoom;
+  const y=(e.clientY-rect.top +wrap.scrollTop) /zoom;
   connMouseX=x; connMouseY=y;
   drawingLine.setAttribute('x2',x); drawingLine.setAttribute('y2',y);
   // Highlight closest port of hovered node
@@ -1523,8 +1581,8 @@ document.getElementById('canvas').addEventListener('mouseup', e=>{
     // drop on canvas — connect to nearest node
     const wrap=document.getElementById('canvas-wrap');
     const rect=wrap.getBoundingClientRect();
-    const mx=e.clientX-rect.left+wrap.scrollLeft;
-    const my=e.clientY-rect.top+wrap.scrollTop;
+    const mx=(e.clientX-rect.left+wrap.scrollLeft)/zoom;
+    const my=(e.clientY-rect.top +wrap.scrollTop) /zoom;
     let best=null,bestD=40;
     nodes.filter(n=>n.id!==connFrom).forEach(n=>{
       ['top','bottom','left','right'].forEach(dir=>{
@@ -1589,30 +1647,57 @@ function getEndPoint(p1, p2, style, c, fn, tn) {
   return p2; // p2 is already the port position on the target node boundary
 }
 
+// Smart orthogonal routing — picks H-V-H, V-H-V, H-V or V-H based on port directions
+function getOrthoRoute(c, p1, p2) {
+  const fp = c.fromPort || 'right';
+  const tp = c.toPort   || 'left';
+  const x1=p1.x, y1=p1.y, x2=p2.x, y2=p2.y, dx=x2-x1, dy=y2-y1;
+  const hDep = fp==='left'||fp==='right';
+  const hArr = tp==='left'||tp==='right';
+
+  if (hDep && hArr) {
+    // H-V-H: both ports horizontal
+    const isBack = fp==='right' ? x2 < x1+10 : x2 > x1-10;
+    const def = isBack ? x1+(fp==='right' ? 40 : -40) : x1+dx/2;
+    const midX = c.midOffsetX!=null ? x1+c.midOffsetX : def;
+    return { type:'HVH', midX,
+      d:`M${x1},${y1} L${midX},${y1} L${midX},${y2} L${x2},${y2}`,
+      lastVec:{dx:x2-midX,dy:0}, firstVec:{dx:fp==='right'?1:-1,dy:0} };
+  }
+  if (!hDep && !hArr) {
+    // V-H-V: both ports vertical
+    const isBack = fp==='bottom' ? y2 < y1+10 : y2 > y1-10;
+    const def = isBack ? y1+(fp==='bottom' ? 40 : -40) : y1+dy/2;
+    const midY = c.midOffsetY!=null ? y1+c.midOffsetY : def;
+    return { type:'VHV', midY,
+      d:`M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2}`,
+      lastVec:{dx:0,dy:y2-midY}, firstVec:{dx:0,dy:fp==='bottom'?1:-1} };
+  }
+  if (hDep) {
+    // H-V elbow: horizontal then vertical
+    return { type:'HV',
+      d:`M${x1},${y1} L${x2},${y1} L${x2},${y2}`,
+      lastVec:{dx:0,dy:y2-y1}, firstVec:{dx:dx,dy:0} };
+  }
+  // V-H elbow: vertical then horizontal
+  return { type:'VH',
+    d:`M${x1},${y1} L${x1},${y2} L${x2},${y2}`,
+    lastVec:{dx:x2-x1,dy:0}, firstVec:{dx:0,dy:dy} };
+}
+
 // Get the direction angle (in radians) of the line arriving at p2
 function arrivalAngle(c, p1, p2) {
-  const dx = p2.x - p1.x, dy = p2.y - p1.y;
-  if (c.style === 'ortho') {
-    // Last segment: (x2, midY) → (x2, y2) — vertical
-    const midY = (c.midOffsetY !== undefined) ? (p1.y + c.midOffsetY) : (p1.y + dy / 2);
-    return Math.atan2(p2.y - midY, 0);
-  }
-  if (c.style === 'step') {
-    // Last segment: (midX, y2) → (x2, y2) — horizontal
-    const midX = (c.midOffsetX !== undefined) ? (p1.x + c.midOffsetX) : (p1.x + dx / 2);
-    return Math.atan2(0, p2.x - midX);
+  if (c.style==='ortho'||c.style==='step') {
+    const r = getOrthoRoute(c, p1, p2);
+    return Math.atan2(r.lastVec.dy, r.lastVec.dx);
   }
   return Math.atan2(p2.y - p1.y, p2.x - p1.x);
 }
 
 function departureAngle(c, p1, p2) {
-  if (c.style === 'ortho') {
-    const dx = p2.x - p1.x;
-    return Math.atan2(0, dx); // first segment: horizontal
-  }
-  if (c.style === 'step') {
-    const dy = p2.y - p1.y;
-    return Math.atan2(dy, 0); // first segment: vertical
+  if (c.style==='ortho'||c.style==='step') {
+    const r = getOrthoRoute(c, p1, p2);
+    return Math.atan2(r.firstVec.dy, r.firstVec.dx);
   }
   return Math.atan2(p2.y - p1.y, p2.x - p1.x);
 }
@@ -1691,17 +1776,10 @@ function pathD(c, fn, tn) {
       const cx1=x1+dx*0.5,cy1=y1,cx2=x2-dx*0.5,cy2=y2;
       return {d:`M${x1},${y1} C${cx1},${cy1} ${cx2},${cy2} ${x2},${y2}`,p1,p2};
     }
+    case 'step':
     case 'ortho': {
-      // 4-segment path with free 2D midpoint: H → V → H → V
-      const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
-      const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
-      return {d:`M${x1},${y1} L${midX},${y1} L${midX},${midY} L${x2},${midY} L${x2},${y2}`,p1,p2,midX,midY};
-    }
-    case 'step': {
-      // 4-segment path with free 2D midpoint: V → H → V → H
-      const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
-      const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
-      return {d:`M${x1},${y1} L${x1},${midY} L${midX},${midY} L${midX},${y2} L${x2},${y2}`,p1,p2,midX,midY};
+      const r = getOrthoRoute(c, p1, p2);
+      return {...r, p1, p2};
     }
     default: return {d:`M${x1},${y1} L${x2},${y2}`,p1,p2};
   }
@@ -1736,23 +1814,16 @@ function redrawAll() {
     const dShort = (() => {
       const dist = arrowOffset;
       const dx = p2.x - p1.x, dy = p2.y - p1.y;
-      if(c.style==='ortho'){
-        // 4-segment: p1 → (midX,p1.y) → (midX,midY) → (p2.x,midY) → p2
-        // Last segment is VERTICAL: (p2.x,midY) → (p2.x,p2.y)
-        const midX=(c.midOffsetX!==undefined)?(p1.x+c.midOffsetX):(p1.x+dx/2);
-        const midY=(c.midOffsetY!==undefined)?(p1.y+c.midOffsetY):(p1.y+dy/2);
-        const sign = p2.y >= midY ? 1 : -1;
-        const endY = dist > 0 ? p2.y - sign*dist : p2.y;
-        return `M${p1.x},${p1.y} L${midX},${p1.y} L${midX},${midY} L${p2.x},${midY} L${p2.x},${endY}`;
-      }
-      if(c.style==='step'){
-        // 4-segment: p1 → (p1.x,midY) → (midX,midY) → (midX,p2.y) → p2
-        // Last segment is HORIZONTAL: (midX,p2.y) → (p2.x,p2.y)
-        const midX=(c.midOffsetX!==undefined)?(p1.x+c.midOffsetX):(p1.x+dx/2);
-        const midY=(c.midOffsetY!==undefined)?(p1.y+c.midOffsetY):(p1.y+dy/2);
-        const sign = p2.x >= midX ? 1 : -1;
-        const endX = dist > 0 ? p2.x - sign*dist : p2.x;
-        return `M${p1.x},${p1.y} L${p1.x},${midY} L${midX},${midY} L${midX},${p2.y} L${endX},${p2.y}`;
+      if(c.style==='ortho'||c.style==='step'){
+        const r = getOrthoRoute(c, p1, p2);
+        if(dist===0) return r.d;
+        const lv=r.lastVec, len=Math.hypot(lv.dx,lv.dy);
+        if(len<dist+1) return r.d;
+        const ex=p2.x-lv.dx/len*dist, ey=p2.y-lv.dy/len*dist;
+        if(r.type==='HVH') return `M${p1.x},${p1.y} L${r.midX},${p1.y} L${r.midX},${p2.y} L${ex},${p2.y}`;
+        if(r.type==='VHV') return `M${p1.x},${p1.y} L${p1.x},${r.midY} L${p2.x},${r.midY} L${p2.x},${ey}`;
+        if(r.type==='HV')  return `M${p1.x},${p1.y} L${p2.x},${p1.y} L${p2.x},${ey}`;
+                           return `M${p1.x},${p1.y} L${p1.x},${p2.y} L${ex},${p2.y}`;
       }
       if(c.style==='curved'){
         const cx1=p1.x+(p2.x-p1.x)*0.5,cy1=p1.y,cx2=p2.x-(p2.x-p1.x)*0.5,cy2=p2.y;
@@ -1818,18 +1889,17 @@ function redrawAll() {
       // Auto-position: near source, clearly offset to the side of the line
       let autoX, autoY;
       const lx1=lp1.x, ly1=lp1.y, lx2=lp2.x, ly2=lp2.y;
-      if(c.style==='ortho'){
-        // First segment is horizontal from p1. Place label on that segment.
-        const midX=(c.midOffsetX!==undefined)?(lx1+c.midOffsetX):(lx1+(lx2-lx1)/2);
-        autoX=(lx1+midX)/2;
-        autoY=ly1;
-        autoY += (ly2 <= ly1 ? 16 : -16);
-      } else if(c.style==='step'){
-        // First segment is vertical from p1. Place label on that segment.
-        const midY=(c.midOffsetY!==undefined)?(ly1+c.midOffsetY):(ly1+(ly2-ly1)/2);
-        autoX=lx1;
-        autoY=(ly1+midY)/2;
-        autoX += (lx2 >= lx1 ? -20 : 20);
+      if(c.style==='ortho'||c.style==='step'){
+        const lr = getOrthoRoute(c, lp1, lp2);
+        if(lr.type==='HVH'){
+          autoX=(lx1+lr.midX)/2; autoY=ly1+(ly2<=ly1?16:-16);
+        } else if(lr.type==='VHV'){
+          autoX=lx1+(lx2>=lx1?-20:20); autoY=(ly1+lr.midY)/2;
+        } else if(lr.type==='HV'){
+          autoX=(lx1+lx2)/2; autoY=ly1+(ly2<=ly1?16:-16);
+        } else {
+          autoX=lx1+(lx2>=lx1?-20:20); autoY=(ly1+ly2)/2;
+        }
       } else {
         // Straight or curved: place near the start (25%), offset perpendicular
         autoX=lx1+(lx2-lx1)*0.25;
@@ -1907,16 +1977,17 @@ function redrawAll() {
       }
     }
 
-    // Midpoint drag handle for step/ortho when selected
-    if(isSelected && (c.style==='step'||c.style==='ortho')){
+    // Midpoint drag handle for ortho when selected (only for 3-segment routes)
+    if(isSelected && (c.style==='ortho'||c.style==='step')){
       const fn2=nodes.find(n=>n.id===c.from);
       const tn2=nodes.find(n=>n.id===c.to);
       const pp1=portPos(fn2,c.fromPort||closestPort(fn2,tn2.x+tn2.w/2,tn2.y+tn2.h/2));
       const pp2=portPos(tn2,c.toPort||closestPort(tn2,fn2.x+fn2.w/2,fn2.y+fn2.h/2));
-      const ddx=pp2.x-pp1.x, ddy=pp2.y-pp1.y;
-      const midX=(c.midOffsetX!==undefined)?(pp1.x+c.midOffsetX):(pp1.x+ddx/2);
-      const midY=(c.midOffsetY!==undefined)?(pp1.y+c.midOffsetY):(pp1.y+ddy/2);
-      const hx=midX, hy=midY;
+      const rr=getOrthoRoute(c,pp1,pp2);
+      // Only show handle for 3-segment routes that have a draggable middle segment
+      if(rr.type!=='HVH'&&rr.type!=='VHV') return;
+      const hx = rr.type==='HVH' ? rr.midX : (pp1.x+pp2.x)/2;
+      const hy = rr.type==='VHV' ? rr.midY : (pp1.y+pp2.y)/2;
       // Shadow/glow behind handle for visibility
       const glow=document.createElementNS('http://www.w3.org/2000/svg','circle');
       glow.classList.add('conn-path');
@@ -1960,15 +2031,15 @@ function startMidDrag(e, connId) {
   const tn=nodes.find(n=>n.id===c.to);
   const p1=portPos(fn,c.fromPort||closestPort(fn,tn.x+tn.w/2,tn.y+tn.h/2));
   const p2=portPos(tn,c.toPort||closestPort(tn,fn.x+fn.w/2,fn.y+fn.h/2));
-  const dx=p2.x-p1.x, dy=p2.y-p1.y;
+  const r=getOrthoRoute(c,p1,p2);
   const wrap=document.getElementById('canvas-wrap');
   const rect=wrap.getBoundingClientRect();
-  const startMx=e.clientX-rect.left+wrap.scrollLeft;
-  const startMy=e.clientY-rect.top+wrap.scrollTop;
-  const curOffX=(c.midOffsetX!==undefined)?c.midOffsetX:(dx/2);
-  const curOffY=(c.midOffsetY!==undefined)?c.midOffsetY:(dy/2);
+  const startMx=(e.clientX-rect.left+wrap.scrollLeft)/zoom;
+  const startMy=(e.clientY-rect.top +wrap.scrollTop) /zoom;
+  const curOffX = r.type==='HVH' ? (c.midOffsetX!=null ? c.midOffsetX : r.midX-p1.x) : 0;
+  const curOffY = r.type==='VHV' ? (c.midOffsetY!=null ? c.midOffsetY : r.midY-p1.y) : 0;
   snapshot();
-  midDragData={connId, startMx, startMy, curOffX, curOffY};
+  midDragData={connId, startMx, startMy, curOffX, curOffY, routeType:r.type};
 }
 
 document.addEventListener('mousemove', e=>{
@@ -1976,10 +2047,15 @@ document.addEventListener('mousemove', e=>{
   const c=conns.find(x=>x.id===midDragData.connId); if(!c) return;
   const wrap=document.getElementById('canvas-wrap');
   const rect=wrap.getBoundingClientRect();
-  const mx=e.clientX-rect.left+wrap.scrollLeft;
-  const my=e.clientY-rect.top+wrap.scrollTop;
-  c.midOffsetX = midDragData.curOffX + (mx - midDragData.startMx);
-  c.midOffsetY = midDragData.curOffY + (my - midDragData.startMy);
+  const mx=(e.clientX-rect.left+wrap.scrollLeft)/zoom;
+  const my=(e.clientY-rect.top +wrap.scrollTop) /zoom;
+  if(midDragData.routeType==='HVH'){
+    c.midOffsetX = midDragData.curOffX + (mx - midDragData.startMx);
+    delete c.midOffsetY;
+  } else if(midDragData.routeType==='VHV'){
+    c.midOffsetY = midDragData.curOffY + (my - midDragData.startMy);
+    delete c.midOffsetX;
+  }
   redrawAll();
 });
 
@@ -1995,8 +2071,8 @@ function startLabelDrag(e, connId, autoX, autoY) {
   const c=conns.find(x=>x.id===connId); if(!c||!c.label) return;
   const wrap=document.getElementById('canvas-wrap');
   const rect=wrap.getBoundingClientRect();
-  const mx=e.clientX-rect.left+wrap.scrollLeft;
-  const my=e.clientY-rect.top+wrap.scrollTop;
+  const mx=(e.clientX-rect.left+wrap.scrollLeft)/zoom;
+  const my=(e.clientY-rect.top +wrap.scrollTop) /zoom;
   labelDragData={
     connId,
     startMx: mx, startMy: my,
@@ -2010,8 +2086,8 @@ document.addEventListener('mousemove', e=>{
   const c=conns.find(x=>x.id===labelDragData.connId); if(!c) return;
   const wrap=document.getElementById('canvas-wrap');
   const rect=wrap.getBoundingClientRect();
-  const mx=e.clientX-rect.left+wrap.scrollLeft;
-  const my=e.clientY-rect.top+wrap.scrollTop;
+  const mx=(e.clientX-rect.left+wrap.scrollLeft)/zoom;
+  const my=(e.clientY-rect.top +wrap.scrollTop) /zoom;
   c.labelOffsetX = labelDragData.startOffX + (mx - labelDragData.startMx);
   c.labelOffsetY = labelDragData.startOffY + (my - labelDragData.startMy);
   redrawAll();
@@ -2038,9 +2114,9 @@ function selectConn(id) {
   document.getElementById('btn-del-sel').style.display='';
   // Show reset-mid button for step/ortho
   const resetBtn=document.getElementById('reset-mid-btn');
-  if(c.style==='step'||c.style==='ortho'){
+  if(c.style==='ortho'||c.style==='step'){
     resetBtn.style.display='';
-    const hasMid = (c.midOffsetX!==undefined)||(c.midOffsetY!==undefined);
+    const hasMid = (c.midOffsetX!=null)||(c.midOffsetY!=null);
     resetBtn.textContent=(hasMid?'↺ Restablecer posición de línea':'⊕ Arrastra el handle para ajustar la línea');
   } else {
     resetBtn.style.display='none';
@@ -2235,6 +2311,9 @@ document.addEventListener('keydown',e=>{
   if(mod && e.key.toLowerCase()==='c' && !inInput){ e.preventDefault(); copySelected(); }
   if(mod && e.key.toLowerCase()==='v' && !inInput){ e.preventDefault(); pasteClipboard(); }
   if(mod && e.key.toLowerCase()==='d' && !inInput){ e.preventDefault(); duplicateSelected(); }
+  if(mod && (e.key==='+' || e.key==='=' || e.key===']') && !inInput){ e.preventDefault(); applyZoom(zoom*1.2, document.getElementById('canvas-wrap').clientWidth/2, document.getElementById('canvas-wrap').clientHeight/2); }
+  if(mod && (e.key==='-' || e.key==='[') && !inInput){ e.preventDefault(); applyZoom(zoom/1.2, document.getElementById('canvas-wrap').clientWidth/2, document.getElementById('canvas-wrap').clientHeight/2); }
+  if(mod && e.key==='0' && !inInput){ e.preventDefault(); applyZoom(1, document.getElementById('canvas-wrap').clientWidth/2, document.getElementById('canvas-wrap').clientHeight/2); }
 });
 
 // Open modal on double-click
