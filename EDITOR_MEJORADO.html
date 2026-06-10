@@ -74,8 +74,7 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 
 #shape-ghost {
   position: fixed; pointer-events: none; z-index: 9999;
-  transform: translate(-50%, -50%); opacity: 0.55;
-  transition: opacity 0.1s;
+  opacity: 0.55; transition: opacity 0.1s;
 }
 #shape-ghost.over-canvas { opacity: 0.82; }
 
@@ -917,8 +916,9 @@ function startShapeDrag(e, shape) {
   ghost.id = 'shape-ghost';
   ghost.style.width  = d.w + 'px';
   ghost.style.height = d.h + 'px';
-  ghost.style.left   = e.clientX + 'px';
-  ghost.style.top    = e.clientY + 'px';
+  ghost.style.left      = e.clientX + 'px';
+  ghost.style.top       = e.clientY + 'px';
+  ghost.style.transform = `translate(-50%,-50%) scale(${zoom})`;
   ghost.innerHTML = `<svg style="width:100%;height:100%;overflow:visible">${buildShape(shape, d.w, d.h, c)}</svg>`;
   document.body.appendChild(ghost);
   const btn = e.currentTarget;
@@ -1479,8 +1479,9 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e=>{
 
 document.addEventListener('mousemove', e=>{
   if(ghostDrag){
-    ghostDrag.el.style.left = e.clientX + 'px';
-    ghostDrag.el.style.top  = e.clientY + 'px';
+    ghostDrag.el.style.left      = e.clientX + 'px';
+    ghostDrag.el.style.top       = e.clientY + 'px';
+    ghostDrag.el.style.transform = `translate(-50%,-50%) scale(${zoom})`;
     const wrap = document.getElementById('canvas-wrap');
     const r = wrap.getBoundingClientRect();
     const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
