@@ -70,6 +70,14 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 }
 .shape-btn:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 .shape-btn svg { width: 34px; height: 24px; }
+.shape-btn.dragging { opacity: 0.5; }
+
+#shape-ghost {
+  position: fixed; pointer-events: none; z-index: 9999;
+  transform: translate(-50%, -50%); opacity: 0.55;
+  transition: opacity 0.1s;
+}
+#shape-ghost.over-canvas { opacity: 0.82; }
 
 /* Color dots */
 .color-row { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -499,27 +507,27 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
       <div class="sb-sec">
         <div class="sb-lbl">Agregar figura</div>
         <div class="shape-grid">
-          <button class="shape-btn" onclick="addNode('rect')">
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'rect')">
             <svg viewBox="0 0 34 24"><rect x="1" y="4" width="32" height="16" rx="3" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>
             Proceso
           </button>
-          <button class="shape-btn" onclick="addNode('diamond')">
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'diamond')">
             <svg viewBox="0 0 34 24"><polygon points="17,2 33,12 17,22 1,12" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>
             Decisión
           </button>
-          <button class="shape-btn" onclick="addNode('circle')">
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'circle')">
             <svg viewBox="0 0 34 24"><rect x="1" y="5" width="32" height="14" rx="7" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>
             Inicio/Fin
           </button>
-          <button class="shape-btn" onclick="addNode('cylinder')">
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'cylinder')">
             <svg viewBox="0 0 34 24"><rect x="3" y="7" width="28" height="12" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/><ellipse cx="17" cy="7" rx="14" ry="3.5" fill="#dce6f1" stroke="#4472a8" stroke-width="1.5"/><ellipse cx="17" cy="19" rx="14" ry="3.5" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>
             Base de datos
           </button>
-          <button class="shape-btn" onclick="addNode('parallelogram')">
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'parallelogram')">
             <svg viewBox="0 0 34 24"><polygon points="8,22 12,2 26,2 22,22" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>
             Entrada/Salida
           </button>
-          <button class="shape-btn" onclick="addNode('hexagon')">
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'hexagon')">
             <svg viewBox="0 0 34 24"><polygon points="8,2 26,2 33,12 26,22 8,22 1,12" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>
             Preparación
           </button>
@@ -777,6 +785,7 @@ let nodes=[], conns=[], nid=0, cid=0;
 let selNode=null, selConn=null;
 let connectMode=false, connFrom=null, connFromPort=null;
 let dragData=null;
+let ghostDrag=null; // { shape, el, activeBtn }
 
 // ── MULTI-SELECT STATE ──
 let multiSel = new Set(); // set of node ids
@@ -898,6 +907,24 @@ function addNode(shape) {
 }
 
 function shapeName(s){return {rect:'Proceso',diamond:'Decisión',circle:'Inicio/Fin',cylinder:'Base de datos',parallelogram:'Entrada/Salida',hexagon:'Preparación'}[s]||s;}
+
+function startShapeDrag(e, shape) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const d = SDEFS[shape];
+  const c = PAL[activeNodeColor] || PAL.blue;
+  const ghost = document.createElement('div');
+  ghost.id = 'shape-ghost';
+  ghost.style.width  = d.w + 'px';
+  ghost.style.height = d.h + 'px';
+  ghost.style.left   = e.clientX + 'px';
+  ghost.style.top    = e.clientY + 'px';
+  ghost.innerHTML = `<svg style="width:100%;height:100%;overflow:visible">${buildShape(shape, d.w, d.h, c)}</svg>`;
+  document.body.appendChild(ghost);
+  const btn = e.currentTarget;
+  btn.classList.add('dragging');
+  ghostDrag = { shape, el: ghost, activeBtn: btn };
+}
 
 // ── RENDER NODE ──
 function renderNode(n) {
@@ -1451,6 +1478,15 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e=>{
 });
 
 document.addEventListener('mousemove', e=>{
+  if(ghostDrag){
+    ghostDrag.el.style.left = e.clientX + 'px';
+    ghostDrag.el.style.top  = e.clientY + 'px';
+    const wrap = document.getElementById('canvas-wrap');
+    const r = wrap.getBoundingClientRect();
+    const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    ghostDrag.el.classList.toggle('over-canvas', over);
+    return;
+  }
   if(panData){
     e.preventDefault();
     const wrap = document.getElementById('canvas-wrap');
@@ -1487,6 +1523,28 @@ document.addEventListener('mousemove', e=>{
   if(lassoData) updateLasso(e);
 });
 document.addEventListener('mouseup', e=>{
+  if(ghostDrag){
+    const g = ghostDrag; ghostDrag = null;
+    g.el.remove();
+    g.activeBtn.classList.remove('dragging');
+    const wrap = document.getElementById('canvas-wrap');
+    const r = wrap.getBoundingClientRect();
+    const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if(over){
+      snapshot();
+      const id='n'+(++nid);
+      const x = (e.clientX - r.left + wrap.scrollLeft) / zoom;
+      const y = (e.clientY - r.top  + wrap.scrollTop)  / zoom;
+      const d = SDEFS[g.shape];
+      const n={id,shape:g.shape,color:activeNodeColor,x:Math.max(0,x-d.w/2),y:Math.max(0,y-d.h/2),w:d.w,h:d.h,title:shapeName(g.shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min'};
+      nodes.push(n);
+      renderNode(n);
+      selectNode(n.id);
+      updateStatus();
+      autoSave();
+    }
+    return;
+  }
   if(panData){ panData=null; document.getElementById('canvas-wrap').style.cursor=''; }
   if(dragData){dragData=null; autoSave();}
   if(lassoData){finishLasso(e); lassoData=null;}
