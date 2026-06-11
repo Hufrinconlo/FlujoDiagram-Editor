@@ -2325,32 +2325,44 @@ function openModal(n) {
 }
 function closeModal(){document.getElementById('modal-bg').classList.remove('open');}
 // ── CLIPBOARD (Copy / Paste / Duplicate) ──
-let clipboard = null; // stores a deep copy of the last copied node
+let clipboard = null; // array of deep-cloned nodes
 
 function copySelected() {
-  if(!selNode) return;
-  const n = nodes.find(x=>x.id===selNode); if(!n) return;
-  clipboard = JSON.parse(JSON.stringify(n)); // deep clone
-  setStatus('Figura copiada — Ctrl+V para pegar');
+  const ids = multiSel.size > 1 ? [...multiSel] : (selNode ? [selNode] : []);
+  if(!ids.length) return;
+  clipboard = ids.map(id => JSON.parse(JSON.stringify(nodes.find(x=>x.id===id)))).filter(Boolean);
+  const count = clipboard.length;
+  setStatus(count === 1 ? 'Figura copiada — Ctrl+V para pegar' : `${count} figuras copiadas — Ctrl+V para pegar`);
 }
 
 function pasteClipboard() {
-  if(!clipboard) return;
+  if(!clipboard || !clipboard.length) return;
   snapshot();
-  const id = 'n'+(++nid);
-  const offset = 28; // pixels to offset so paste is visible
-  const n = {...JSON.parse(JSON.stringify(clipboard)), id,
-    x: clipboard.x + offset, y: clipboard.y + offset};
-  nodes.push(n);
-  renderNode(n);
-  selectNode(n.id);
+  const offset = 28;
+  const idMap = {};
+  const pasted = clipboard.map(src => {
+    const id = 'n'+(++nid);
+    idMap[src.id] = id;
+    return {...JSON.parse(JSON.stringify(src)), id, x: src.x + offset, y: src.y + offset};
+  });
+  pasted.forEach(n => { nodes.push(n); renderNode(n); });
+  // Select all pasted nodes
+  multiSel.clear(); selNode = null; selConn = null;
+  if(pasted.length === 1) {
+    selectNode(pasted[0].id);
+  } else {
+    pasted.forEach(n => multiSel.add(n.id));
+    pasted.forEach(n => renderNode(n));
+    updateMultiSelUI();
+  }
   updateStatus();
   // Shift clipboard so repeated pastes cascade nicely
-  clipboard = JSON.parse(JSON.stringify(n));
+  clipboard = pasted.map(n => JSON.parse(JSON.stringify(n)));
 }
 
 function duplicateSelected() {
-  if(!selNode) return;
+  const ids = multiSel.size > 1 ? [...multiSel] : (selNode ? [selNode] : []);
+  if(!ids.length) return;
   copySelected();
   pasteClipboard();
 }
