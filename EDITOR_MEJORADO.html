@@ -2058,17 +2058,6 @@ function redrawAll() {
       txt.textContent=c.label;
       svg.appendChild(txt);
 
-      // Show reset hint if label has been moved
-      if((c.labelOffsetX||0)!==0||(c.labelOffsetY||0)!==0){
-        const dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
-        dot.classList.add('conn-label');
-        dot.setAttribute('cx', lx + pillW/2 - 3);
-        dot.setAttribute('cy', ly - pillH/2 + 3);
-        dot.setAttribute('r','4');
-        dot.setAttribute('fill','#2563eb');
-        dot.setAttribute('pointer-events','none');
-        svg.appendChild(dot);
-      }
     }
 
     // Midpoint drag handle for ortho when selected (only for 3-segment routes)
