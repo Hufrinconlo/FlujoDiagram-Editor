@@ -645,7 +645,7 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
         <button id="reset-mid-btn" style="display:none;width:100%;margin-top:6px;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text2);font-family:DM Sans,sans-serif;font-size:12px;font-weight:500;cursor:pointer" onclick="resetMidOffset()" title="Vuelve la línea a su posición automática">↺ Restablecer posición de línea</button>
         <button id="reset-label-btn" style="display:none;width:100%;margin-top:4px;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text2);font-family:DM Sans,sans-serif;font-size:12px;font-weight:500;cursor:pointer" onclick="resetLabelPos()" title="Vuelve la etiqueta a su posición automática">↺ Restablecer posición de etiqueta</button>
         <div id="label-drag-hint" style="display:none;font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5;padding:6px 8px;background:var(--bg);border-radius:6px">
-          💡 Arrastra la etiqueta directamente en el canvas para reposicionarla. Doble clic para resetear.
+          💡 Arrastra la etiqueta directamente en el canvas para reposicionarla. Doble clic para editar.
         </div>
       </div>
     </div>
@@ -1741,6 +1741,13 @@ function getEndPoint(p1, p2, style, c, fn, tn) {
   return p2; // p2 is already the port position on the target node boundary
 }
 
+function curvedCPs(c, p1, p2) {
+  const dx = p2.x - p1.x;
+  const bx = c.curveBX || 0, by = c.curveBY || 0;
+  return { cx1: p1.x + dx*0.5 + bx, cy1: p1.y + by,
+           cx2: p2.x - dx*0.5 + bx, cy2: p2.y + by };
+}
+
 // Smart orthogonal routing — picks H-V-H, V-H-V, H-V or V-H based on port directions
 function getOrthoRoute(c, p1, p2) {
   const fp = c.fromPort || 'right';
@@ -1785,6 +1792,10 @@ function arrivalAngle(c, p1, p2) {
     const r = getOrthoRoute(c, p1, p2);
     return Math.atan2(r.lastVec.dy, r.lastVec.dx);
   }
+  if (c.style==='curved') {
+    const {cx2,cy2}=curvedCPs(c,p1,p2);
+    return Math.atan2(p2.y-cy2, p2.x-cx2);
+  }
   return Math.atan2(p2.y - p1.y, p2.x - p1.x);
 }
 
@@ -1792,6 +1803,10 @@ function departureAngle(c, p1, p2) {
   if (c.style==='ortho'||c.style==='step') {
     const r = getOrthoRoute(c, p1, p2);
     return Math.atan2(r.firstVec.dy, r.firstVec.dx);
+  }
+  if (c.style==='curved') {
+    const {cx1,cy1}=curvedCPs(c,p1,p2);
+    return Math.atan2(cy1-p1.y, cx1-p1.x);
   }
   return Math.atan2(p2.y - p1.y, p2.x - p1.x);
 }
@@ -1867,7 +1882,7 @@ function pathD(c, fn, tn) {
 
   switch(c.style){
     case 'curved': {
-      const cx1=x1+dx*0.5,cy1=y1,cx2=x2-dx*0.5,cy2=y2;
+      const {cx1,cy1,cx2,cy2}=curvedCPs(c,p1,p2);
       return {d:`M${x1},${y1} C${cx1},${cy1} ${cx2},${cy2} ${x2},${y2}`,p1,p2};
     }
     case 'step':
@@ -1920,9 +1935,10 @@ function redrawAll() {
                            return `M${p1.x},${p1.y} L${p1.x},${p2.y} L${ex},${p2.y}`;
       }
       if(c.style==='curved'){
-        const cx1=p1.x+(p2.x-p1.x)*0.5,cy1=p1.y,cx2=p2.x-(p2.x-p1.x)*0.5,cy2=p2.y;
+        const {cx1,cy1,cx2,cy2}=curvedCPs(c,p1,p2);
         if(dist===0) return `M${p1.x},${p1.y} C${cx1},${cy1} ${cx2},${cy2} ${p2.x},${p2.y}`;
-        const p2s=shortenEnd(p1,p2,dist);
+        // Shorten along the actual arrival tangent (CP2→P2), not the straight diagonal
+        const p2s=shortenEnd({x:cx2,y:cy2},p2,dist);
         return `M${p1.x},${p1.y} C${cx1},${cy1} ${cx2},${cy2} ${p2s.x},${p2s.y}`;
       }
       // straight
@@ -2024,7 +2040,7 @@ function redrawAll() {
       hitRect.setAttribute('fill', 'transparent');
       hitRect.style.cursor='move';
       hitRect.addEventListener('mousedown', e=>startLabelDrag(e, c.id, autoX, autoY));
-      hitRect.addEventListener('dblclick', e=>{e.stopPropagation(); c.labelOffsetX=0; c.labelOffsetY=0; redrawAll(); autoSave();});
+      hitRect.addEventListener('dblclick', e=>{e.stopPropagation(); startLabelEdit(c.id, lx, ly, pillW, pillH);});
       svg.appendChild(hitRect);
 
       const pill=document.createElementNS('http://www.w3.org/2000/svg','rect');
@@ -2040,7 +2056,7 @@ function redrawAll() {
       pill.setAttribute('filter', 'drop-shadow(0 1px 3px rgba(0,0,0,0.12))');
       pill.style.cursor='move';
       pill.addEventListener('mousedown', e=>startLabelDrag(e, c.id, autoX, autoY));
-      pill.addEventListener('dblclick', e=>{e.stopPropagation(); c.labelOffsetX=0; c.labelOffsetY=0; redrawAll(); autoSave();});
+      pill.addEventListener('dblclick', e=>{e.stopPropagation(); startLabelEdit(c.id, lx, ly, pillW, pillH);});
       svg.appendChild(pill);
 
       const txt=document.createElementNS('http://www.w3.org/2000/svg','text');
@@ -2101,6 +2117,42 @@ function redrawAll() {
       ring.addEventListener('dblclick', resetMid);
       glow.addEventListener('dblclick', resetMid);
     }
+
+    // Curve bend handle — shown when a curved line is selected
+    if(isSelected && c.style==='curved'){
+      const fn2=nodes.find(n=>n.id===c.from);
+      const tn2=nodes.find(n=>n.id===c.to);
+      const pp1=portPos(fn2,c.fromPort||closestPort(fn2,tn2.x+tn2.w/2,tn2.y+tn2.h/2));
+      const pp2=portPos(tn2,c.toPort||closestPort(tn2,fn2.x+fn2.w/2,fn2.y+fn2.h/2));
+      // Handle sits at the visual t=0.5 of the cubic: mid + 0.75*(bx,by)
+      const hx=(pp1.x+pp2.x)/2 + 0.75*(c.curveBX||0);
+      const hy=(pp1.y+pp2.y)/2 + 0.75*(c.curveBY||0);
+      const cglow=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      cglow.classList.add('conn-path');
+      cglow.setAttribute('cx',hx); cglow.setAttribute('cy',hy); cglow.setAttribute('r',13);
+      cglow.setAttribute('fill','rgba(37,99,235,0.12)'); cglow.setAttribute('stroke','none');
+      cglow.style.cursor='move';
+      cglow.addEventListener('mousedown',e=>startCurveDrag(e,c.id));
+      svg.appendChild(cglow);
+      const cring=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      cring.classList.add('conn-path');
+      cring.setAttribute('cx',hx); cring.setAttribute('cy',hy); cring.setAttribute('r',9);
+      cring.setAttribute('fill','#ffffff'); cring.setAttribute('stroke','#2563eb'); cring.setAttribute('stroke-width','2');
+      cring.style.cursor='move';
+      cring.addEventListener('mousedown',e=>startCurveDrag(e,c.id));
+      svg.appendChild(cring);
+      const carr=document.createElementNS('http://www.w3.org/2000/svg','text');
+      carr.classList.add('conn-path');
+      carr.setAttribute('x',hx); carr.setAttribute('y',hy);
+      carr.setAttribute('text-anchor','middle'); carr.setAttribute('dominant-baseline','central');
+      carr.setAttribute('font-size','11'); carr.setAttribute('fill','#2563eb');
+      carr.setAttribute('font-weight','700'); carr.setAttribute('pointer-events','none');
+      carr.textContent='⊕';
+      svg.appendChild(carr);
+      const resetCurve=e=>{e.stopPropagation();snapshot();delete c.curveBX;delete c.curveBY;redrawAll();autoSave();};
+      cring.addEventListener('dblclick',resetCurve);
+      cglow.addEventListener('dblclick',resetCurve);
+    }
   });
 }
 
@@ -2125,6 +2177,17 @@ function startMidDrag(e, connId) {
   midDragData={connId, startMx, startMy, curOffX, curOffY, routeType:r.type};
 }
 
+function startCurveDrag(e, connId) {
+  e.stopPropagation(); e.preventDefault();
+  const c = conns.find(x=>x.id===connId); if(!c) return;
+  const wrap=document.getElementById('canvas-wrap');
+  const rect=wrap.getBoundingClientRect();
+  const startMx=(e.clientX-rect.left+wrap.scrollLeft)/zoom;
+  const startMy=(e.clientY-rect.top +wrap.scrollTop) /zoom;
+  snapshot();
+  midDragData={connId, startMx, startMy, curOffX:c.curveBX||0, curOffY:c.curveBY||0, routeType:'curved'};
+}
+
 document.addEventListener('mousemove', e=>{
   if(!midDragData) return;
   const c=conns.find(x=>x.id===midDragData.connId); if(!c) return;
@@ -2138,6 +2201,10 @@ document.addEventListener('mousemove', e=>{
   } else if(midDragData.routeType==='VHV'){
     c.midOffsetY = midDragData.curOffY + (my - midDragData.startMy);
     delete c.midOffsetX;
+  } else if(midDragData.routeType==='curved'){
+    // Handle moves at 0.75× the CP offset, so scale delta by 4/3 into the stored bend
+    c.curveBX = midDragData.curOffX + (mx - midDragData.startMx) * (4/3);
+    c.curveBY = midDragData.curOffY + (my - midDragData.startMy) * (4/3);
   }
   redrawAll();
 });
@@ -2145,6 +2212,59 @@ document.addEventListener('mousemove', e=>{
 document.addEventListener('mouseup', ()=>{
   if(midDragData){ midDragData=null; autoSave(); }
 });
+
+// ── LABEL INLINE EDIT ──
+function startLabelEdit(connId, lx, ly, pillW, pillH) {
+  const c = conns.find(x => x.id === connId); if (!c) return;
+  const wrap = document.getElementById('canvas-wrap');
+  const wrapRect = wrap.getBoundingClientRect();
+  const sx = lx * zoom - wrap.scrollLeft + wrapRect.left;
+  const sy = ly * zoom - wrap.scrollTop  + wrapRect.top;
+  const w  = pillW * zoom;
+  const h  = pillH * zoom;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = c.label || '';
+  Object.assign(input.style, {
+    position: 'fixed',
+    left: (sx - w / 2) + 'px',
+    top:  (sy - h / 2) + 'px',
+    width: w + 'px',
+    height: h + 'px',
+    border: '2px solid #2563eb',
+    borderRadius: (h / 2) + 'px',
+    background: '#fff',
+    fontFamily: 'DM Sans, sans-serif',
+    fontSize: (11 * zoom) + 'px',
+    fontWeight: '600',
+    textAlign: 'center',
+    padding: '0 ' + (8 * zoom) + 'px',
+    boxSizing: 'border-box',
+    outline: 'none',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+    zIndex: '9999',
+  });
+
+  let done = false;
+  const commit = () => {
+    if (done) return; done = true;
+    const val = input.value.trim();
+    if (val !== (c.label || '')) snapshot();
+    c.label = val;
+    input.remove();
+    redrawAll(); autoSave();
+  };
+
+  input.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { commit(); }
+    if (e.key === 'Escape') { done = true; input.remove(); }
+  });
+  input.addEventListener('blur', commit);
+  document.body.appendChild(input);
+  input.select();
+}
 
 // ── LABEL DRAG ──
 let labelDragData = null;
