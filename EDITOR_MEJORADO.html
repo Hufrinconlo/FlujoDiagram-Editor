@@ -673,6 +673,26 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
             </div>
           </div>
           <div class="pf">
+            <label>Fuente del texto</label>
+            <select id="p-font-family" onchange="updateFontProp()">
+              <option value="">DM Sans (predeterminado)</option>
+              <option value="Arial, sans-serif">Arial</option>
+              <option value="Helvetica, sans-serif">Helvetica</option>
+              <option value="Georgia, serif">Georgia</option>
+              <option value="'Times New Roman', serif">Times New Roman</option>
+              <option value="'Courier New', monospace">Courier New</option>
+              <option value="Verdana, sans-serif">Verdana</option>
+              <option value="Trebuchet MS, sans-serif">Trebuchet MS</option>
+            </select>
+          </div>
+          <div class="pf">
+            <label>Tamaño de texto</label>
+            <div class="size-row">
+              <input id="p-font-size" type="number" min="7" max="48" step="1" placeholder="Auto" style="width:72px;flex-shrink:0" oninput="updateFontProp()">
+              <span style="font-size:10px;color:var(--text3)">px (vacío = automático)</span>
+            </div>
+          </div>
+          <div class="pf">
             <label>Duración del proceso</label>
             <div style="display:flex;gap:6px;align-items:center">
               <input id="p-dur-val" type="number" min="0" step="1" placeholder="0" style="width:72px;flex-shrink:0" oninput="updateDuration()">
@@ -898,7 +918,7 @@ function addNode(shape) {
   const cx=(wrap.scrollLeft+wrap.clientWidth/2)/zoom;
   const cy=(wrap.scrollTop+wrap.clientHeight/2)/zoom;
   const d=SDEFS[shape];
-  const n={id,shape,color:activeNodeColor,x:Math.max(20,cx-d.w/2+(Math.random()-.5)*80),y:Math.max(20,cy-d.h/2+(Math.random()-.5)*80),w:d.w,h:d.h,title:shapeName(shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min'};
+  const n={id,shape,color:activeNodeColor,x:Math.max(20,cx-d.w/2+(Math.random()-.5)*80),y:Math.max(20,cy-d.h/2+(Math.random()-.5)*80),w:d.w,h:d.h,title:shapeName(shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min',fontFamily:'',fontSize:0};
   nodes.push(n);
   renderNode(n);
   selectNode(n.id);
@@ -923,7 +943,7 @@ function startShapeDrag(e, shape) {
   document.body.appendChild(ghost);
   const btn = e.currentTarget;
   btn.classList.add('dragging');
-  ghostDrag = { shape, el: ghost, activeBtn: btn };
+  ghostDrag = { shape, el: ghost, activeBtn: btn, startX: e.clientX, startY: e.clientY };
 }
 
 // ── RENDER NODE ──
@@ -987,8 +1007,10 @@ function renderNode(n) {
   ntEl.style.color=c.text;
   nsEl.textContent=n.sub||'';
   nsEl.style.color=c.text;
-  // Auto-scale font size based on shape and text length
   applyShapeTextFit(n, ntEl, nsEl);
+  const ff = n.fontFamily || "'DM Sans', sans-serif";
+  ntEl.style.fontFamily = ff;
+  nsEl.style.fontFamily = ff;
   // Duration badge
   let badge=el.querySelector('.dur-badge');
   const dl=durLabel(n);
@@ -1009,20 +1031,18 @@ function renderNode(n) {
 
 // ── TEXT FIT BY SHAPE ──
 function applyShapeTextFit(n, ntEl, nsEl) {
-  // For diamonds: usable width ≈ 56% of total, usable height ≈ 56% of total
-  // For hexagons: usable width ≈ 64%, parallelogram usable width ≈ 72%
+  if (n.fontSize && n.fontSize > 0) {
+    ntEl.style.fontSize = n.fontSize + 'px';
+    nsEl.style.fontSize = Math.max(7, n.fontSize - 2) + 'px';
+    return;
+  }
   const shapeFactor = { diamond: 0.54, hexagon: 0.64, parallelogram: 0.72 };
   const factor = shapeFactor[n.shape] || 1.0;
   const usableW = n.w * factor;
   const titleLen = (n.title || '').length;
-
-  // Compute font size: start at 12.5px, shrink if text is long relative to usable area
-  // Approximate: each char ~7px wide at 12.5px. Reduce proportionally.
   const charsPerLine = Math.max(6, Math.floor(usableW / 7.5));
-  const lines = Math.ceil(titleLen / charsPerLine);
   let fs = 12.5;
   if (n.shape === 'diamond') {
-    // Diamonds need more aggressive shrinking
     if (titleLen > charsPerLine * 3) fs = 9;
     else if (titleLen > charsPerLine * 2) fs = 10.5;
     else if (titleLen > charsPerLine) fs = 11.5;
@@ -1031,7 +1051,6 @@ function applyShapeTextFit(n, ntEl, nsEl) {
     else if (titleLen > charsPerLine * 2) fs = 11;
   }
   ntEl.style.fontSize = fs + 'px';
-  // Subtitle scales with title
   nsEl.style.fontSize = Math.max(8.5, fs - 2) + 'px';
 }
 
@@ -1116,6 +1135,8 @@ function showNodeProps(id) {
   document.getElementById('p-consideraciones').value=n.consideraciones||'';
   document.getElementById('p-dur-val').value=n.durVal||'';
   document.getElementById('p-dur-unit').value=n.durUnit||'min';
+  document.getElementById('p-font-family').value=n.fontFamily||'';
+  document.getElementById('p-font-size').value=n.fontSize||'';
   renderNormativaList(n);
   document.querySelectorAll('#node-color-row .cdot').forEach(d=>d.classList.toggle('sel',d.dataset.c===n.color));
   activeNodeColor=n.color;
@@ -1330,6 +1351,13 @@ function updateDuration() {
   renderNode(n); updateStatus();
 }
 
+function updateFontProp() {
+  const n=nodes.find(x=>x.id===selNode); if(!n)return;
+  n.fontFamily=document.getElementById('p-font-family').value;
+  n.fontSize=parseInt(document.getElementById('p-font-size').value)||0;
+  renderNode(n); autoSave();
+}
+
 function durLabel(n) {
   if(!n.durVal||n.durVal<=0)return null;
   const v=n.durVal;
@@ -1530,14 +1558,21 @@ document.addEventListener('mouseup', e=>{
     g.activeBtn.classList.remove('dragging');
     const wrap = document.getElementById('canvas-wrap');
     const r = wrap.getBoundingClientRect();
+    const isClick = Math.hypot(e.clientX - g.startX, e.clientY - g.startY) < 5;
     const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    if(over){
+    if(isClick || over){
       snapshot();
       const id='n'+(++nid);
-      const x = (e.clientX - r.left + wrap.scrollLeft) / zoom;
-      const y = (e.clientY - r.top  + wrap.scrollTop)  / zoom;
       const d = SDEFS[g.shape];
-      const n={id,shape:g.shape,color:activeNodeColor,x:Math.max(0,x-d.w/2),y:Math.max(0,y-d.h/2),w:d.w,h:d.h,title:shapeName(g.shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min'};
+      let x, y;
+      if(isClick){
+        x = (wrap.scrollLeft + wrap.clientWidth/2) / zoom;
+        y = (wrap.scrollTop  + wrap.clientHeight/2) / zoom;
+      } else {
+        x = (e.clientX - r.left + wrap.scrollLeft) / zoom;
+        y = (e.clientY - r.top  + wrap.scrollTop)  / zoom;
+      }
+      const n={id,shape:g.shape,color:activeNodeColor,x:Math.max(0,x-d.w/2),y:Math.max(0,y-d.h/2),w:d.w,h:d.h,title:shapeName(g.shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min',fontFamily:'',fontSize:0};
       nodes.push(n);
       renderNode(n);
       selectNode(n.id);
@@ -2789,7 +2824,10 @@ window.addEventListener('DOMContentLoaded',()=>{
     let fs2=12.5;
     if(n.shape==='diamond'){if(tlen2>cpl2*3)fs2=9;else if(tlen2>cpl2*2)fs2=10.5;else if(tlen2>cpl2)fs2=11.5;}
     else if(sf2<1.0){if(tlen2>cpl2*3)fs2=10;else if(tlen2>cpl2*2)fs2=11;}
-    el.innerHTML='<svg class="sh">'+bS(n.shape,n.w,n.h,c)+'</svg><div class="lw"><div class="nt" style="color:'+c.text+';font-size:'+fs2+'px">'+escH(n.title||'')+'</div>'+(n.sub?'<div class="ns" style="color:'+c.text+';font-size:'+Math.max(8.5,fs2-2)+'px">'+escH(n.sub)+'</div>':'')+'</div>'+badge;
+    if(n.fontSize&&n.fontSize>0){fs2=n.fontSize;}
+    const ff2=n.fontFamily||"'DM Sans',sans-serif";
+    const subFs2=Math.max(7,fs2-2);
+    el.innerHTML='<svg class="sh">'+bS(n.shape,n.w,n.h,c)+'</svg><div class="lw"><div class="nt" style="color:'+c.text+';font-size:'+fs2+'px;font-family:'+ff2+'">'+escH(n.title||'')+'</div>'+(n.sub?'<div class="ns" style="color:'+c.text+';font-size:'+subFs2+'px;font-family:'+ff2+'">'+escH(n.sub)+'</div>':'')+'</div>'+badge;
     el.addEventListener('click',()=>om(n));
     cv.appendChild(el);
   });

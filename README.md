@@ -37,17 +37,16 @@ Abre `EDITOR_MEJORADO.html` directamente en el navegador. No requiere instalaci�
 
 **2 do list:**
 
-- Selección multiple toma el texto de la interfaz y las etiquetas de las lineas.
-- Las etiquetas de las lineas se les queda un punto azul.
-- Click derecho + hold abre el menu si se suelta sobre la interfaz.
-- Escalado automatico de la figura cuando el texto supera el tamaño de esta.
-- Snap lines to 90, 0, 180, 270 angles
+- Fix: Selección multiple toma el texto de la interfaz y las etiquetas de las lineas.
+- Remover: Las etiquetas de las lineas se les queda un punto azul.
+- Remover: Click derecho + hold abre el menu si se suelta sobre la interfaz.
+- Añadir: Escalado automatico de la figura cuando el texto supera el tamaño de esta.
+- Añadir: Snap lines/figuras to 90, 0, 180, 270 angles
 - Arreglar la queue de deshacer/rehacer.
-- Incluir tamaño de letra
-- Click en la etiqueta de la linea permite editarla.
-- Click derecho en los circulos de las lineas abre una linea.
-- Lineas curvas tengan un punto para moverlas/cambiarlas como las orto.
-- Definir y editar el tamaño del canvas.
-- Algo que maneje los estados de guardado o algo.
-- Volver las lineas items standalone.
-- El boton de conectar no hacee nada.
+- Añadir: Click en la etiqueta de la linea permite editarla.
+- Remover: Click derecho en los circulos de las lineas abre una linea.
+- Añadir: Lineas curvas tengan un punto para moverlas/cambiarlas como las orto.
+- Añadir: Definir y editar el tamaño del canvas.
+- Añadir: Algo que maneje los estados de guardado o algo.
+- Change: Volver las lineas items standalone.
+- Fix: El boton de conectar no hacee nada.
