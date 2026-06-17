@@ -69,6 +69,7 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
   font-family: 'DM Sans', sans-serif; transition: all 0.12s;
 }
 .shape-btn:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+.shape-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .shape-btn svg { width: 34px; height: 24px; }
 .shape-btn.dragging { opacity: 0.5; }
 
@@ -631,7 +632,7 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
           <div class="cdot"     data-lc="violet" style="background:#7c3aed" onclick="setLineColor('#7c3aed','violet')" title="Violeta"></div>
           <div class="cdot"     data-lc="green"  style="background:#059669" onclick="setLineColor('#059669','green')" title="Verde"></div>
           <div class="cdot"     data-lc="red"    style="background:#dc2626" onclick="setLineColor('#dc2626','red')" title="Rojo"></div>
-          <div class="cdot"     data-lc="amber"  style="background:#d97706" onclick="setLineColor('#d97706','amber')" title="Ámbar"></div>
+          <div class="cdot"     data-lc="amber"  style="background:#9c7a00" onclick="setLineColor('#9c7a00','amber')" title="Ámbar"></div>
           <div class="cdot"     data-lc="black"  style="background:#1a1917" onclick="setLineColor('#1a1917','black')" title="Negro"></div>
         </div>
       </div>
@@ -718,6 +719,17 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
             <div style="display:flex;gap:6px;margin-top:6px">
               <input id="p-norm-inp" type="text" placeholder="Ej: Resolución 001-2024, Ley 80..." style="flex:1">
               <button onclick="addNormativa()" style="padding:0 10px;border:1px solid var(--border);border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;white-space:nowrap">+ Agregar</button>
+            </div>
+          </div>
+          <div class="pf" style="margin-top:4px">
+            <label>Cambiar forma</label>
+            <div class="shape-grid" id="change-shape-grid">
+              <button class="shape-btn" id="csg-rect"         onclick="changeNodeShape('rect')"><svg viewBox="0 0 34 24"><rect x="1" y="4" width="32" height="16" rx="3" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>Proceso</button>
+              <button class="shape-btn" id="csg-diamond"      onclick="changeNodeShape('diamond')"><svg viewBox="0 0 34 24"><polygon points="17,2 33,12 17,22 1,12" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>Decisión</button>
+              <button class="shape-btn" id="csg-circle"       onclick="changeNodeShape('circle')"><svg viewBox="0 0 34 24"><rect x="1" y="5" width="32" height="14" rx="7" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>Inicio/Fin</button>
+              <button class="shape-btn" id="csg-cylinder"     onclick="changeNodeShape('cylinder')"><svg viewBox="0 0 34 24"><rect x="3" y="7" width="28" height="12" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/><ellipse cx="17" cy="7" rx="14" ry="3.5" fill="#dce6f1" stroke="#4472a8" stroke-width="1.5"/><ellipse cx="17" cy="19" rx="14" ry="3.5" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>Base de datos</button>
+              <button class="shape-btn" id="csg-parallelogram" onclick="changeNodeShape('parallelogram')"><svg viewBox="0 0 34 24"><polygon points="8,22 12,2 26,2 22,22" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>Entrada/Salida</button>
+              <button class="shape-btn" id="csg-hexagon"      onclick="changeNodeShape('hexagon')"><svg viewBox="0 0 34 24"><polygon points="8,2 26,2 33,12 26,22 8,22 1,12" fill="#b8cce4" stroke="#4472a8" stroke-width="1.5"/></svg>Preparación</button>
             </div>
           </div>
           <div style="display:flex;gap:8px;margin-top:4px">
@@ -1140,6 +1152,10 @@ function showNodeProps(id) {
   renderNormativaList(n);
   document.querySelectorAll('#node-color-row .cdot').forEach(d=>d.classList.toggle('sel',d.dataset.c===n.color));
   activeNodeColor=n.color;
+  document.querySelectorAll('#change-shape-grid .shape-btn').forEach(btn=>{
+    const s=btn.id.replace('csg-','');
+    btn.classList.toggle('active', s===n.shape);
+  });
 }
 
 function renderNormativaList(n) {
@@ -1343,6 +1359,18 @@ document.getElementById('canvas-wrap').addEventListener('wheel', e=>{
 function updateProp(f,v) {
   const n=nodes.find(x=>x.id===selNode); if(!n)return;
   n[f]=v; renderNode(n); autoSave();
+}
+
+function changeNodeShape(shape) {
+  const n=nodes.find(x=>x.id===selNode); if(!n||n.shape===shape)return;
+  snapshot();
+  n.shape=shape;
+  renderNode(n);
+  redrawAll();
+  autoSave();
+  document.querySelectorAll('#change-shape-grid .shape-btn').forEach(btn=>{
+    btn.classList.toggle('active', btn.id.replace('csg-','')===shape);
+  });
 }
 
 function updateDuration() {
