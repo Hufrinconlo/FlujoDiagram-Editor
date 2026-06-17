@@ -1254,6 +1254,7 @@ function startLasso(e) {
   lassoData = {sx: e.clientX, sy: e.clientY, ox, oy, cx: ox, cy: oy};
   const lasso = document.getElementById('lasso');
   lasso.style.display = 'none';
+  document.body.style.userSelect = 'none';
   if(!e.shiftKey) { multiSel.clear(); selNode=null; nodes.forEach(n=>renderNode(n)); updateMultiSelUI(); }
 }
 
@@ -1281,6 +1282,7 @@ function updateLasso(e) {
 }
 
 function finishLasso(e) {
+  document.body.style.userSelect = '';
   const lasso = document.getElementById('lasso');
   lasso.style.display = 'none';
   if(!lassoData) return;
