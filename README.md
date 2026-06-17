@@ -37,7 +37,6 @@ Abre `EDITOR_MEJORADO.html` directamente en el navegador. No requiere instalaci�
 
 **2 do list:**
 
-- Fix: Selección multiple toma el texto de la interfaz y las etiquetas de las lineas.
 - Remover: Click derecho + hold abre el menu si se suelta sobre la interfaz. (windows)
 - Añadir: Escalado automatico de la figura cuando el texto supera el tamaño de esta.
 - Añadir: Snap lines/figuras to 90, 0, 180, 270 angles
@@ -46,4 +45,3 @@ Abre `EDITOR_MEJORADO.html` directamente en el navegador. No requiere instalaci�
 - Añadir: Definir y editar el tamaño del canvas.
 - Añadir: Algo que maneje los estados de guardado o algo.
 - Change: Volver las lineas items standalone.
-- Fix: El boton de conectar no hace nada.

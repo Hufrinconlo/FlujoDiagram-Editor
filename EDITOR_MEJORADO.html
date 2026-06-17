@@ -1629,10 +1629,10 @@ function cancelConn() {
 // Toggle connect mode (click nodes to connect)
 function toggleConnectMode() {
   if(connFrom){cancelConn();return;}
-  // Just toggle visual hint
   const btn=document.getElementById('btn-connect');
   const on=!btn.classList.contains('active');
   btn.classList.toggle('active',on);
+  document.body.classList.toggle('connecting',on);
   setStatus(on?'Arrastra desde los puertos azules de cada figura para conectar':'');
 }
 
@@ -2995,6 +2995,169 @@ function escH(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/
   const a=document.createElement('a');
   a.href=URL.createObjectURL(b);a.download='flujograma.html';a.click();
 }
+
+// ── GOOGLE DRIVE INTEGRATION ──
+let gdAccessToken = null;
+
+// On load: detect OAuth redirect callback (token arrives in URL hash)
+(function() {
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  const token = hash.get('access_token');
+  if (token && hash.get('state') === 'gd_auth') {
+    sessionStorage.setItem('gd_token', token);
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+  gdAccessToken = sessionStorage.getItem('gd_token') || null;
+})();
+
+function gdCreds() {
+  return { clientId: localStorage.getItem('gd_client_id') || '' };
+}
+
+function gdPanel(id) {
+  ['gd-setup','gd-signin','gd-connected'].forEach(p =>
+    document.getElementById(p).style.display = p === id ? '' : 'none');
+}
+
+function gdStatus(msg, err) {
+  const el = document.getElementById('gd-status-msg');
+  el.textContent = msg; el.style.display = msg ? '' : 'none';
+  el.style.color = err ? '#dc2626' : '#059669';
+}
+
+function openDriveModal() {
+  document.getElementById('gdrive-modal-bg').classList.add('open');
+  const { clientId } = gdCreds();
+  if (!clientId) {
+    document.getElementById('gd-client-id-inp').value = clientId;
+    gdPanel('gd-setup');
+  } else if (!gdAccessToken) {
+    gdPanel('gd-signin');
+  } else {
+    gdPanel('gd-connected');
+  }
+}
+
+function closeDriveModal() {
+  document.getElementById('gdrive-modal-bg').classList.remove('open');
+  document.getElementById('gd-files-wrap').style.display = 'none';
+  gdStatus('');
+}
+
+function saveDriveCredentials() {
+  const clientId = document.getElementById('gd-client-id-inp').value.trim();
+  if (!clientId) { alert('Introduce el Client ID.'); return; }
+  localStorage.setItem('gd_client_id', clientId);
+  gdPanel('gd-signin');
+}
+
+function resetDriveCredentials() {
+  localStorage.removeItem('gd_client_id');
+  sessionStorage.removeItem('gd_token');
+  gdAccessToken = null;
+  gdPanel('gd-setup');
+}
+
+function driveSignIn() {
+  const { clientId } = gdCreds();
+  if (!clientId) { gdStatus('Configura el Client ID primero.', true); return; }
+  const redirectUri = window.location.href.split('#')[0].split('?')[0];
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'token',
+    scope: 'https://www.googleapis.com/auth/drive.file',
+    state: 'gd_auth'
+  });
+  window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
+}
+
+function driveSignOut() {
+  sessionStorage.removeItem('gd_token');
+  gdAccessToken = null;
+  gdPanel('gd-signin');
+}
+
+async function gdFetch(url, opts) {
+  return fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + gdAccessToken, ...(opts?.headers||{}) } });
+}
+
+async function driveSave() {
+  if (!gdAccessToken) { gdStatus('No autenticado.', true); return; }
+  gdStatus('Guardando...');
+  try {
+    const filename = 'flujograma.json';
+    const body = JSON.stringify({ nodes, conns });
+    const search = await gdFetch(`https://www.googleapis.com/drive/v3/files?q=name='${filename}'+and+trashed=false&fields=files(id)`);
+    const { files = [] } = await search.json();
+    let resp;
+    if (files.length) {
+      resp = await gdFetch(`https://www.googleapis.com/upload/drive/v3/files/${files[0].id}?uploadType=media`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body
+      });
+    } else {
+      const meta = JSON.stringify({ name: filename, mimeType: 'application/json' });
+      const boundary = 'gd_fc_boundary';
+      const mp = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
+      resp = await gdFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body: mp
+      });
+    }
+    if (resp.ok) { gdStatus('✓ Guardado en Drive'); }
+    else { const e = await resp.json(); gdStatus('Error: ' + (e.error?.message || resp.status), true); }
+  } catch (e) {
+    if (e.message?.includes('401') || e.message?.includes('403')) {
+      sessionStorage.removeItem('gd_token'); gdAccessToken = null; gdPanel('gd-signin');
+    }
+    gdStatus('Error: ' + e.message, true);
+  }
+}
+
+async function driveLoadList() {
+  if (!gdAccessToken) { gdStatus('No autenticado.', true); return; }
+  gdStatus('Cargando lista...');
+  try {
+    const resp = await gdFetch(`https://www.googleapis.com/drive/v3/files?q=name+contains+'.json'+and+trashed=false&fields=files(id,name,modifiedTime)&orderBy=modifiedTime+desc`);
+    const { files = [] } = await resp.json();
+    gdStatus('');
+    const list = document.getElementById('gd-files-list');
+    list.innerHTML = '';
+    if (!files.length) {
+      list.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px 0">No hay proyectos guardados.</div>';
+    } else {
+      files.forEach(f => {
+        const row = document.createElement('div');
+        const date = new Date(f.modifiedTime).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:6px;cursor:pointer;gap:8px;';
+        row.innerHTML = `<span style="font-size:12.5px;flex:1">${f.name}</span><span style="font-size:11px;color:var(--text3)">${date}</span>`;
+        row.onmouseenter = () => row.style.background = 'var(--bg)';
+        row.onmouseleave = () => row.style.background = '';
+        row.onclick = () => driveLoadFile(f.id, f.name);
+        list.appendChild(row);
+      });
+    }
+    document.getElementById('gd-files-wrap').style.display = '';
+  } catch (e) { gdStatus('Error: ' + e.message, true); }
+}
+
+async function driveLoadFile(fileId, name) {
+  gdStatus('Abriendo ' + name + '...');
+  try {
+    const resp = await gdFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    const data = await resp.json();
+    if (!data.nodes || !data.conns) throw new Error('Formato de archivo inválido');
+    snapshot();
+    nodes.length = 0; conns.length = 0;
+    data.nodes.forEach(n => nodes.push(n));
+    data.conns.forEach(c => conns.push(c));
+    document.getElementById('canvas').querySelectorAll('.fnode').forEach(el => el.remove());
+    nodes.forEach(n => { const num = parseInt(n.id.slice(1)); if (num > nid) nid = num; renderNode(n); });
+    selNode = null; selConn = null;
+    redrawAll(); updateStatus(); autoSave();
+    gdStatus('✓ ' + name + ' cargado');
+    setTimeout(closeDriveModal, 900);
+  } catch (e) { gdStatus('Error: ' + e.message, true); }
+}
 </script>
 <!-- GOOGLE DRIVE MODAL -->
 <div id="gdrive-modal-bg" onclick="if(event.target===this)closeDriveModal()">
@@ -3011,14 +3174,13 @@ function escH(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/
       <div class="gd-step">
         <div class="gd-num">1</div>
         <div class="gd-step-txt">
-          Ve a <b>console.cloud.google.com</b>, crea un proyecto, activa la <b>Google Drive API</b> y crea una <b>API Key</b> y un <b>OAuth 2.0 Client ID</b> (tipo "Aplicación web", con origen <b>null</b> o tu dominio).
+          Ve a <b>console.cloud.google.com</b>, crea un proyecto, activa la <b>Google Drive API</b> y crea un <b>OAuth 2.0 Client ID</b> (tipo "Aplicación web"). En "URIs de redireccionamiento autorizados" añade la URL de esta página (ej. <b>http://localhost:8000/EDITOR_MEJORADO.html</b>).
         </div>
       </div>
       <div class="gd-step">
         <div class="gd-num">2</div>
         <div class="gd-step-txt">
-          Pega tus credenciales aquí. Se guardan solo en tu navegador.
-          <input class="gd-inp" id="gd-api-key-inp" type="text" placeholder="API Key (AIza...)">
+          Pega tu Client ID aquí. Se guarda solo en tu navegador.
           <input class="gd-inp" id="gd-client-id-inp" type="text" placeholder="Client ID (...apps.googleusercontent.com)" style="margin-top:6px">
         </div>
       </div>
