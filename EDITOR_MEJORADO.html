@@ -534,6 +534,23 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
         </div>
       </div>
       <div class="sb-sec">
+        <div class="sb-lbl">Anotaciones</div>
+        <div class="shape-grid">
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'anno-text')">
+            <svg viewBox="0 0 34 24"><text x="5" y="18" font-size="16" font-weight="700" fill="#64748b" font-family="serif">T</text><line x1="5" y1="20" x2="29" y2="20" stroke="#64748b" stroke-width="1.5"/></svg>
+            Texto
+          </button>
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'anno-rect')">
+            <svg viewBox="0 0 34 24"><rect x="2" y="2" width="30" height="20" rx="3" fill="rgba(100,116,139,0.12)" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 2.5"/></svg>
+            Área
+          </button>
+          <button class="shape-btn" onmousedown="startShapeDrag(event,'anno-ellipse')">
+            <svg viewBox="0 0 34 24"><ellipse cx="17" cy="12" rx="15" ry="10" fill="rgba(100,116,139,0.12)" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 2.5"/></svg>
+            Óvalo
+          </button>
+        </div>
+      </div>
+      <div class="sb-sec">
         <div class="sb-lbl">Color de figura</div>
         <div class="color-row" id="node-color-row">
           <div class="cdot sel" data-c="blue"   style="background:#4472a8" onclick="setNodeColor('blue')"   title="Azul"></div>
@@ -808,7 +825,7 @@ const PAL = {
   gray:   {fill:'#d9d9d9',stroke:'#767676',text:'#262626',light:'#f2f2f2'},
   dark:   {fill:'#44546a',stroke:'#1f3864',text:'#ffffff',light:'#5a6e84'},
 };
-const SDEFS = {rect:{w:160,h:60},diamond:{w:170,h:90},circle:{w:160,h:50},cylinder:{w:150,h:84},parallelogram:{w:160,h:60},hexagon:{w:160,h:70}};
+const SDEFS = {rect:{w:160,h:60},diamond:{w:170,h:90},circle:{w:160,h:50},cylinder:{w:150,h:84},parallelogram:{w:160,h:60},hexagon:{w:160,h:70},'anno-text':{w:160,h:44},'anno-rect':{w:220,h:160},'anno-ellipse':{w:200,h:140}};
 const ICONS = {rect:'📋',diamond:'❓',circle:'⭕',cylinder:'🗄️',parallelogram:'↔️',hexagon:'⚙️'};
 
 // ── STATE ──
@@ -930,14 +947,14 @@ function addNode(shape) {
   const cx=(wrap.scrollLeft+wrap.clientWidth/2)/zoom;
   const cy=(wrap.scrollTop+wrap.clientHeight/2)/zoom;
   const d=SDEFS[shape];
-  const n={id,shape,color:activeNodeColor,x:Math.max(20,cx-d.w/2+(Math.random()-.5)*80),y:Math.max(20,cy-d.h/2+(Math.random()-.5)*80),w:d.w,h:d.h,title:shapeName(shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min',fontFamily:'',fontSize:0};
+  const n={id,shape,color:shape.startsWith('anno-')?'slate':activeNodeColor,x:Math.max(20,cx-d.w/2+(Math.random()-.5)*80),y:Math.max(20,cy-d.h/2+(Math.random()-.5)*80),w:d.w,h:d.h,title:shape==='anno-text'?'Texto de anotación':shape==='anno-rect'||shape==='anno-ellipse'?'':shapeName(shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min',fontFamily:'',fontSize:0};
   nodes.push(n);
   renderNode(n);
   selectNode(n.id);
   updateStatus();
 }
 
-function shapeName(s){return {rect:'Proceso',diamond:'Decisión',circle:'Inicio/Fin',cylinder:'Base de datos',parallelogram:'Entrada/Salida',hexagon:'Preparación'}[s]||s;}
+function shapeName(s){return {rect:'Proceso',diamond:'Decisión',circle:'Inicio/Fin',cylinder:'Base de datos',parallelogram:'Entrada/Salida',hexagon:'Preparación','anno-text':'Texto','anno-rect':'Área','anno-ellipse':'Óvalo'}[s]||s;}
 
 function startShapeDrag(e, shape) {
   if (e.button !== 0) return;
@@ -1007,10 +1024,13 @@ function renderNode(n) {
         nodeClicked(n.id, e);
       }
     });
-    document.getElementById('canvas').appendChild(el);
+    const isBg = n.shape==='anno-rect'||n.shape==='anno-ellipse';
+    const canvas = document.getElementById('canvas');
+    if(isBg) canvas.insertBefore(el, canvas.firstChild); else canvas.appendChild(el);
   }
+  const isBg = n.shape==='anno-rect'||n.shape==='anno-ellipse';
   const c=PAL[n.color]||PAL.blue;
-  el.style.cssText=`left:${n.x}px;top:${n.y}px;width:${n.w}px;height:${n.h}px`;
+  el.style.cssText=`left:${n.x}px;top:${n.y}px;width:${n.w}px;height:${n.h}px;z-index:${isBg?2:10}`;
   el.setAttribute('data-shape', n.shape);
   el.querySelector('svg.shape').innerHTML=buildShape(n.shape,n.w,n.h,c);
   const ntEl = el.querySelector('.nt');
@@ -1039,6 +1059,26 @@ function renderNode(n) {
   }
   el.classList.toggle('selected', selNode===n.id);
   el.classList.toggle('multi-selected', multiSel.has(n.id) && selNode!==n.id);
+  // Annotations: hide ports, tweak text layout
+  const isAnno = n.shape && n.shape.startsWith('anno-');
+  const portsEl = el.querySelector('.ports');
+  if (portsEl) portsEl.style.display = isAnno ? 'none' : '';
+  const lwEl = el.querySelector('.lw');
+  if (lwEl) {
+    if (n.shape === 'anno-text') {
+      lwEl.style.alignItems = 'flex-start';
+      lwEl.style.justifyContent = 'flex-start';
+      lwEl.style.padding = '4px 6px';
+      ntEl.style.textAlign = 'left';
+      nsEl.style.textAlign = 'left';
+    } else {
+      lwEl.style.alignItems = '';
+      lwEl.style.justifyContent = '';
+      lwEl.style.padding = '';
+      ntEl.style.textAlign = '';
+      nsEl.style.textAlign = '';
+    }
+  }
 }
 
 // ── TEXT FIT BY SHAPE ──
@@ -1081,6 +1121,10 @@ function buildShape(s,w,h,c) {
     case 'parallelogram': { const sk=20; return `<polygon points="${sk},1 ${w-1},1 ${w-sk},${h-1} 1,${h-1}" fill="${f}" stroke="${st}" stroke-width="1.5"/>`; }
     // Preparación: hexágono estándar
     case 'hexagon': { const q=w*.22; return `<polygon points="${q},2 ${w-q},2 ${w-2},${h/2} ${w-q},${h-2} ${q},${h-2} 2,${h/2}" fill="${f}" stroke="${st}" stroke-width="1.5"/>`; }
+    // Anotaciones
+    case 'anno-text': return ''; // solo texto, sin fondo SVG
+    case 'anno-rect': return `<rect x="1" y="1" width="${w-2}" height="${h-2}" rx="6" fill="${f}" fill-opacity="0.15" stroke="${st}" stroke-width="1.5" stroke-dasharray="6 3"/>`;
+    case 'anno-ellipse': return `<ellipse cx="${w/2}" cy="${h/2}" rx="${w/2-1}" ry="${h/2-1}" fill="${f}" fill-opacity="0.15" stroke="${st}" stroke-width="1.5" stroke-dasharray="6 3"/>`;
     default: return `<rect x="1" y="1" width="${w-2}" height="${h-2}" rx="4" fill="${f}" stroke="${st}" stroke-width="1.5"/>`;
   }
 }
@@ -1602,7 +1646,7 @@ document.addEventListener('mouseup', e=>{
         x = (e.clientX - r.left + wrap.scrollLeft) / zoom;
         y = (e.clientY - r.top  + wrap.scrollTop)  / zoom;
       }
-      const n={id,shape:g.shape,color:activeNodeColor,x:Math.max(0,x-d.w/2),y:Math.max(0,y-d.h/2),w:d.w,h:d.h,title:shapeName(g.shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min',fontFamily:'',fontSize:0};
+      const n={id,shape:g.shape,color:g.shape.startsWith('anno-')?'slate':activeNodeColor,x:Math.max(0,x-d.w/2),y:Math.max(0,y-d.h/2),w:d.w,h:d.h,title:g.shape==='anno-text'?'Texto de anotación':g.shape==='anno-rect'||g.shape==='anno-ellipse'?'':shapeName(g.shape),sub:'',info:'',consideraciones:'',normativa:[],durVal:0,durUnit:'min',fontFamily:'',fontSize:0};
       nodes.push(n);
       renderNode(n);
       selectNode(n.id);
@@ -2559,6 +2603,25 @@ document.addEventListener('keydown',e=>{
   if(mod && (e.key==='+' || e.key==='=' || e.key===']') && !inInput){ e.preventDefault(); applyZoom(zoom*1.2, document.getElementById('canvas-wrap').clientWidth/2, document.getElementById('canvas-wrap').clientHeight/2); }
   if(mod && (e.key==='-' || e.key==='[') && !inInput){ e.preventDefault(); applyZoom(zoom/1.2, document.getElementById('canvas-wrap').clientWidth/2, document.getElementById('canvas-wrap').clientHeight/2); }
   if(mod && e.key==='0' && !inInput){ e.preventDefault(); applyZoom(1, document.getElementById('canvas-wrap').clientWidth/2, document.getElementById('canvas-wrap').clientHeight/2); }
+
+  // ── ARROW KEY NUDGE ──
+  const NUDGE_STEP = 1; // px per keypress — edit this value to adjust movement amount
+  if(!inInput && (e.key==='ArrowUp'||e.key==='ArrowDown'||e.key==='ArrowLeft'||e.key==='ArrowRight')){
+    const ids = multiSel.size > 1 ? [...multiSel] : (selNode ? [selNode] : []);
+    if(!ids.length) return;
+    e.preventDefault();
+    snapshot();
+    const dx = e.key==='ArrowLeft' ? -NUDGE_STEP : e.key==='ArrowRight' ? NUDGE_STEP : 0;
+    const dy = e.key==='ArrowUp'   ? -NUDGE_STEP : e.key==='ArrowDown'  ? NUDGE_STEP : 0;
+    ids.forEach(id => {
+      const n = nodes.find(x=>x.id===id); if(!n) return;
+      n.x = Math.max(0, n.x + dx);
+      n.y = Math.max(0, n.y + dy);
+      renderNode(n);
+    });
+    redrawAll();
+    autoSave();
+  }
 });
 
 // Open modal on double-click

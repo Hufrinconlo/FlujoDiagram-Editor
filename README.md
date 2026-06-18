@@ -45,3 +45,4 @@ Abre `EDITOR_MEJORADO.html` directamente en el navegador. No requiere instalaci�
 - Añadir: Definir y editar el tamaño del canvas.
 - Añadir: Algo que maneje los estados de guardado o algo.
 - Change: Volver las lineas items standalone.
+- Añadir: Una forma de exportar los archivos en png u otro formato que permita interactuar.
