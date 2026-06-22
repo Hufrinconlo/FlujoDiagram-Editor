@@ -38,11 +38,7 @@ Abre `EDITOR_MEJORADO.html` directamente en el navegador. No requiere instalaci�
 **2 do list:**
 
 - Remover: Click derecho + hold abre el menu si se suelta sobre la interfaz. (windows)
-- Añadir: Escalado automatico de la figura cuando el texto supera el tamaño de esta.
 - Añadir: Snap lines/figuras to 90, 0, 180, 270 angles
 - Arreglar la queue de deshacer/rehacer.
-- Remover: Click derecho en los circulos de las lineas abre una linea.
-- Añadir: Definir y editar el tamaño del canvas.
 - Añadir: Algo que maneje los estados de guardado o algo.
-- Change: Volver las lineas items standalone.
 - Añadir: Una forma de exportar los archivos en png u otro formato que permita interactuar.

@@ -45,6 +45,23 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 .tb-btn.primary:hover { background: #333; }
 .spacer { flex: 1; }
 .tb-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+.export-wrap { position: relative; }
+.export-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 500;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 4px; min-width: 200px;
+}
+.export-menu button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; padding: 9px 11px; border: none; border-radius: 5px;
+  background: none; cursor: pointer; font-family: 'DM Sans', sans-serif;
+  font-size: 12.5px; font-weight: 500; color: var(--text); text-align: left;
+  flex-direction: row; align-items: center; gap: 8px;
+}
+.export-menu button:hover { background: var(--bg); }
+.export-menu button span {
+  display: block; font-size: 10.5px; color: var(--text3); font-weight: 400; flex: 1;
+}
 
 /* MAIN */
 #main { display: flex; flex: 1; overflow: hidden; }
@@ -488,10 +505,25 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
   </button>
   <input type="file" id="file-input" accept=".json" style="display:none" onchange="onFileSelected(event)">
   <div class="tb-sep"></div>
-  <button class="tb-btn primary" onclick="exportHTML()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-    Exportar HTML
-  </button>
+  <div class="export-wrap" id="export-wrap">
+    <button class="tb-btn primary" onclick="toggleExportMenu()" title="Opciones de exportación">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+      Exportar
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;margin-left:1px"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="export-menu" id="export-menu" style="display:none">
+      <button onclick="exportHTML();toggleExportMenu()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        HTML interactivo
+        <span>Mantiene el doble clic para ver info</span>
+      </button>
+      <button onclick="exportPNG()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        Imagen PNG
+        <span>Imagen estática de alta resolución</span>
+      </button>
+    </div>
+  </div>
 </div>
 
 <div id="main">
@@ -1403,6 +1435,52 @@ document.getElementById('canvas-wrap').addEventListener('wheel', e=>{
 function updateProp(f,v) {
   const n=nodes.find(x=>x.id===selNode); if(!n)return;
   n[f]=v; renderNode(n); autoSave();
+}
+
+// ── AUTO-WIDTH ──
+const _tw = (() => {
+  const el = document.createElement('span');
+  el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;white-space:nowrap;visibility:hidden;pointer-events:none';
+  document.body.appendChild(el);
+  return el;
+})();
+
+function measureStr(text, fontFamily, fontSize, fontWeight) {
+  _tw.style.fontFamily = fontFamily;
+  _tw.style.fontSize   = fontSize + 'px';
+  _tw.style.fontWeight = fontWeight;
+  _tw.textContent = text;
+  return _tw.offsetWidth;
+}
+
+function autoWidthNode(n) {
+  if (!n) return;
+  // Área and Óvalo are manual-sized containers — skip
+  if (n.shape === 'anno-rect' || n.shape === 'anno-ellipse') return;
+
+  const ff = n.fontFamily || "'DM Sans', sans-serif";
+  const fs = n.fontSize   || 12.5;
+
+  const titleW = measureStr(n.title || '', ff, fs,            '600');
+  const subW   = measureStr(n.sub   || '', ff, Math.max(8.5, fs - 2), '400');
+  const textW  = Math.max(titleW, subW);
+
+  // Shapes where the text area is narrower than the node width
+  const shapeFactor = { diamond: 0.54, hexagon: 0.64, parallelogram: 0.72 };
+  const factor = shapeFactor[n.shape] || 1.0;
+  const PAD    = 24; // horizontal breathing room inside the shape
+
+  const needed = Math.ceil(textW / factor) + PAD;
+  const minW   = (SDEFS[n.shape] || { w: 100 }).w;
+  const newW   = Math.max(minW, needed);
+
+  if (newW === n.w) return;
+  n.w = newW;
+  const el = document.getElementById(n.id);
+  if (el) el.style.width = newW + 'px';
+  const wInp = document.getElementById('p-width');
+  if (wInp && selNode === n.id) wInp.value = newW;
+  redrawAll();
 }
 
 function changeNodeShape(shape) {
@@ -2330,6 +2408,18 @@ function startLabelEdit(connId, lx, ly, pillW, pillH) {
     redrawAll(); autoSave();
   };
 
+  const centerX = sx;
+  const resizeLabelInput = () => {
+    _tw.style.fontFamily = 'DM Sans, sans-serif';
+    _tw.style.fontSize   = (11 * zoom) + 'px';
+    _tw.style.fontWeight = '600';
+    _tw.textContent = input.value || '';
+    const newW = Math.max(60 * zoom, _tw.offsetWidth + 24 * zoom);
+    input.style.width = newW + 'px';
+    input.style.left  = (centerX - newW / 2) + 'px';
+  };
+
+  input.addEventListener('input', resizeLabelInput);
   input.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.key === 'Enter') { commit(); }
@@ -2744,6 +2834,69 @@ function updateStatus(){
 }
 
 // ── EXPORT ──
+// ── EXPORT MENU ──
+function toggleExportMenu() {
+  const menu = document.getElementById('export-menu');
+  menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+document.addEventListener('click', e => {
+  if (!document.getElementById('export-wrap').contains(e.target))
+    document.getElementById('export-menu').style.display = 'none';
+});
+
+// ── PNG EXPORT ──
+async function exportPNG() {
+  document.getElementById('export-menu').style.display = 'none';
+  if (!nodes.length) { alert('Agrega figuras antes de exportar.'); return; }
+
+  // Lazy-load html2canvas
+  if (!window.html2canvas) {
+    setStatus('Cargando exportador…');
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      s.onload = resolve; s.onerror = () => reject(new Error('No se pudo cargar html2canvas'));
+      document.head.appendChild(s);
+    }).catch(err => { alert('Error: ' + err.message); return; });
+    if (!window.html2canvas) return;
+  }
+
+  setStatus('Generando PNG…');
+
+  const PAD = 48;
+  const minX = Math.max(0, Math.min(...nodes.map(n => n.x)) - PAD);
+  const minY = Math.max(0, Math.min(...nodes.map(n => n.y)) - PAD);
+  const maxX = Math.max(...nodes.map(n => n.x + n.w)) + PAD;
+  const maxY = Math.max(...nodes.map(n => n.y + n.h)) + PAD;
+
+  const canvasEl = document.getElementById('canvas');
+  // Temporarily neutralise zoom transform so we capture at 1:1 canvas coords
+  canvasEl.style.transform = 'scale(1)';
+
+  try {
+    const result = await html2canvas(canvasEl, {
+      x: minX, y: minY,
+      width: maxX - minX, height: maxY - minY,
+      scale: 2,           // 2× resolution for sharp output on retina screens
+      useCORS: true,
+      backgroundColor: '#f7f7f5',
+      logging: false,
+      imageTimeout: 0
+    });
+
+    const fecha = new Date().toISOString().slice(0,10);
+    const a = document.createElement('a');
+    a.download = `flujograma-${fecha}.png`;
+    a.href = result.toDataURL('image/png');
+    a.click();
+    setStatus('PNG exportado');
+  } catch(e) {
+    alert('Error al exportar PNG: ' + e.message);
+  } finally {
+    canvasEl.style.transform = `scale(${zoom})`;
+  }
+}
+
 function exportHTML(){
   if(!nodes.length){alert('Agrega figuras antes de exportar.');return;}
 
