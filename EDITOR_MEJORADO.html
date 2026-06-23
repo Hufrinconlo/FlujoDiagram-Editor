@@ -2900,11 +2900,86 @@ async function exportPNG() {
 function exportHTML(){
   if(!nodes.length){alert('Agrega figuras antes de exportar.');return;}
 
-  // Inline arrowhead drawing logic (mirrors the editor's drawArrow)
+  // Crop canvas to diagram bounding box + padding (same as PNG export)
+  const PAD = 48;
+  const minX = Math.min(...nodes.map(n => n.x));
+  const minY = Math.min(...nodes.map(n => n.y));
+  const maxX = Math.max(...nodes.map(n => n.x + n.w));
+  const maxY = Math.max(...nodes.map(n => n.y + n.h));
+  const cvW  = maxX - minX + PAD * 2;
+  const cvH  = maxY - minY + PAD * 2;
+  // Shift all node positions so diagram starts at (PAD, PAD)
+  const exportNodes = nodes.map(n => ({...n, x: n.x - minX + PAD, y: n.y - minY + PAD}));
+
+  // Connection routing — exact copies of the editor's functions
   const arrowJS = `
+function curvedCPs(c,p1,p2){
+  const dx=p2.x-p1.x,bx=c.curveBX||0,by=c.curveBY||0;
+  return{cx1:p1.x+dx*.5+bx,cy1:p1.y+by,cx2:p2.x-dx*.5+bx,cy2:p2.y+by};
+}
+function getOrthoRoute(c,p1,p2){
+  const fp=c.fromPort||'right',tp=c.toPort||'left';
+  const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y,dx=x2-x1,dy=y2-y1;
+  const hDep=fp==='left'||fp==='right',hArr=tp==='left'||tp==='right';
+  if(hDep&&hArr){
+    const isBack=fp==='right'?x2<x1+10:x2>x1-10;
+    const def=isBack?x1+(fp==='right'?40:-40):x1+dx/2;
+    const midX=c.midOffsetX!=null?x1+c.midOffsetX:def;
+    return{type:'HVH',midX,d:'M'+x1+','+y1+' L'+midX+','+y1+' L'+midX+','+y2+' L'+x2+','+y2,
+      lastVec:{dx:x2-midX,dy:0},firstVec:{dx:fp==='right'?1:-1,dy:0}};
+  }
+  if(!hDep&&!hArr){
+    const isBack=fp==='bottom'?y2<y1+10:y2>y1-10;
+    const def=isBack?y1+(fp==='bottom'?40:-40):y1+dy/2;
+    const midY=c.midOffsetY!=null?y1+c.midOffsetY:def;
+    return{type:'VHV',midY,d:'M'+x1+','+y1+' L'+x1+','+midY+' L'+x2+','+midY+' L'+x2+','+y2,
+      lastVec:{dx:0,dy:y2-midY},firstVec:{dx:0,dy:fp==='bottom'?1:-1}};
+  }
+  if(hDep)return{type:'HV',d:'M'+x1+','+y1+' L'+x2+','+y1+' L'+x2+','+y2,
+    lastVec:{dx:0,dy:y2-y1},firstVec:{dx:dx,dy:0}};
+  return{type:'VH',d:'M'+x1+','+y1+' L'+x1+','+y2+' L'+x2+','+y2,
+    lastVec:{dx:x2-x1,dy:0},firstVec:{dx:0,dy:dy}};
+}
+function arrivalAngle(c,p1,p2){
+  if(c.style==='ortho'||c.style==='step'){const r=getOrthoRoute(c,p1,p2);return Math.atan2(r.lastVec.dy,r.lastVec.dx);}
+  if(c.style==='curved'){const{cx2,cy2}=curvedCPs(c,p1,p2);return Math.atan2(p2.y-cy2,p2.x-cx2);}
+  return Math.atan2(p2.y-p1.y,p2.x-p1.x);
+}
+function departureAngle(c,p1,p2){
+  if(c.style==='ortho'||c.style==='step'){const r=getOrthoRoute(c,p1,p2);return Math.atan2(r.firstVec.dy,r.firstVec.dx);}
+  if(c.style==='curved'){const{cx1,cy1}=curvedCPs(c,p1,p2);return Math.atan2(cy1-p1.y,cx1-p1.x);}
+  return Math.atan2(p2.y-p1.y,p2.x-p1.x);
+}
+function shortenEnd(a,b,dist){
+  const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy);
+  if(len<dist+1)return b;
+  return{x:b.x-dx/len*dist,y:b.y-dy/len*dist};
+}
+function buildPath(c,p1,p2){
+  const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y;
+  if(c.style==='curved'){const{cx1,cy1,cx2,cy2}=curvedCPs(c,p1,p2);return{d:'M'+x1+','+y1+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+x2+','+y2,p1,p2};}
+  if(c.style==='ortho'||c.style==='step'){const r=getOrthoRoute(c,p1,p2);return{...r,p1,p2};}
+  return{d:'M'+x1+','+y1+' L'+x2+','+y2,p1,p2};
+}
+function buildShortPath(c,p1,p2,dist){
+  if(c.style==='ortho'||c.style==='step'){
+    const r=getOrthoRoute(c,p1,p2);if(dist===0)return r.d;
+    const lv=r.lastVec,len=Math.hypot(lv.dx,lv.dy);if(len<dist+1)return r.d;
+    const ex=p2.x-lv.dx/len*dist,ey=p2.y-lv.dy/len*dist;
+    if(r.type==='HVH')return 'M'+p1.x+','+p1.y+' L'+r.midX+','+p1.y+' L'+r.midX+','+p2.y+' L'+ex+','+p2.y;
+    if(r.type==='VHV')return 'M'+p1.x+','+p1.y+' L'+p1.x+','+r.midY+' L'+p2.x+','+r.midY+' L'+p2.x+','+ey;
+    if(r.type==='HV') return 'M'+p1.x+','+p1.y+' L'+p2.x+','+p1.y+' L'+p2.x+','+ey;
+                      return 'M'+p1.x+','+p1.y+' L'+p1.x+','+p2.y+' L'+ex+','+p2.y;
+  }
+  if(c.style==='curved'){
+    const{cx1,cy1,cx2,cy2}=curvedCPs(c,p1,p2);if(dist===0)return 'M'+p1.x+','+p1.y+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+p2.x+','+p2.y;
+    const p2s=shortenEnd({x:cx2,y:cy2},p2,dist);return 'M'+p1.x+','+p1.y+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+p2s.x+','+p2s.y;
+  }
+  if(dist===0)return 'M'+p1.x+','+p1.y+' L'+p2.x+','+p2.y;
+  const p2s=shortenEnd(p1,p2,dist);return 'M'+p1.x+','+p1.y+' L'+p2s.x+','+p2s.y;
+}
 function drawArrow(svg,type,px,py,angle,col,w){
-  const size=7+Math.max(1,w)*1.5;
-  const cos=Math.cos(angle),sin=Math.sin(angle);
+  const size=7+Math.max(1,w)*1.5,cos=Math.cos(angle),sin=Math.sin(angle);
   const rot=(x,y)=>[px+x*cos-y*sin,py+x*sin+y*cos];
   if(type==='arrow'||type==='both'){
     const[ax,ay]=rot(-size,-size*.45),[bx,by]=rot(-size,size*.45);
@@ -2923,70 +2998,15 @@ function drawArrow(svg,type,px,py,angle,col,w){
     const r=size*.55,[cx2,cy2]=rot(-r,0);
     const el=document.createElementNS('http://www.w3.org/2000/svg','circle');
     el.setAttribute('cx',cx2);el.setAttribute('cy',cy2);el.setAttribute('r',r);
-    el.setAttribute('fill','#fff');el.setAttribute('stroke',col);
-    el.setAttribute('stroke-width',Math.max(1.5,w*.8));svg.appendChild(el);
+    el.setAttribute('fill','#fff');el.setAttribute('stroke',col);el.setAttribute('stroke-width',Math.max(1.5,w*.8));
+    svg.appendChild(el);
   }else if(type==='diamond-end'){
     const hs=size*.5,[tx,ty]=rot(0,0),[rx,ry]=rot(-hs,-hs*.6),[bx2,by2]=rot(-hs*2,0),[lx2,ly2]=rot(-hs,hs*.6);
     const el=document.createElementNS('http://www.w3.org/2000/svg','polygon');
     el.setAttribute('points',tx+','+ty+' '+rx+','+ry+' '+bx2+','+by2+' '+lx2+','+ly2);
-    el.setAttribute('fill','#fff');el.setAttribute('stroke',col);
-    el.setAttribute('stroke-width',Math.max(1.2,w*.7));svg.appendChild(el);
+    el.setAttribute('fill','#fff');el.setAttribute('stroke',col);el.setAttribute('stroke-width',Math.max(1.2,w*.7));
+    svg.appendChild(el);
   }
-}
-/* Arrival angle: direction of the LAST segment of the path */
-function arrAngle(c,p1,p2){
-  const dx=p2.x-p1.x,dy=p2.y-p1.y;
-  if(c.style==='ortho'){
-    // Last segment is VERTICAL: (x2,midY)→(x2,y2)
-    const midY=(c.midOffsetY!==undefined)?(p1.y+c.midOffsetY):(p1.y+dy/2);
-    return Math.atan2(p2.y-midY,0);
-  }
-  if(c.style==='step'){
-    // Last segment is HORIZONTAL: (midX,y2)→(x2,y2)
-    const midX=(c.midOffsetX!==undefined)?(p1.x+c.midOffsetX):(p1.x+dx/2);
-    return Math.atan2(0,p2.x-midX);
-  }
-  return Math.atan2(p2.y-p1.y,p2.x-p1.x);
-}
-/* Build full path string (4-segment ortho/step with free midpoint) */
-function pD2(c,p1,p2){
-  const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y,dx=x2-x1,dy=y2-y1;
-  if(c.style==='curved')return 'M'+x1+','+y1+' C'+(x1+dx*.5)+','+y1+' '+(x2-dx*.5)+','+y2+' '+x2+','+y2;
-  if(c.style==='ortho'){
-    const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
-    const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
-    return 'M'+x1+','+y1+' L'+midX+','+y1+' L'+midX+','+midY+' L'+x2+','+midY+' L'+x2+','+y2;
-  }
-  if(c.style==='step'){
-    const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
-    const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
-    return 'M'+x1+','+y1+' L'+x1+','+midY+' L'+midX+','+midY+' L'+midX+','+y2+' L'+x2+','+y2;
-  }
-  return 'M'+x1+','+y1+' L'+x2+','+y2;
-}
-/* Shorten path end along the actual LAST segment direction */
-function pD2Short(c,p1,p2,dist){
-  const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y,dx=x2-x1,dy=y2-y1;
-  if(c.style==='ortho'){
-    const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
-    const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
-    // Last segment VERTICAL: shorten y
-    const sign=y2>=midY?1:-1;
-    return 'M'+x1+','+y1+' L'+midX+','+y1+' L'+midX+','+midY+' L'+x2+','+midY+' L'+x2+','+(y2-sign*dist);
-  }
-  if(c.style==='step'){
-    const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+dx/2);
-    const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+dy/2);
-    // Last segment HORIZONTAL: shorten x
-    const sign=x2>=midX?1:-1;
-    return 'M'+x1+','+y1+' L'+x1+','+midY+' L'+midX+','+midY+' L'+midX+','+y2+' L'+(x2-sign*dist)+','+y2;
-  }
-  if(c.style==='curved'){
-    const len=Math.hypot(dx,dy);if(len<dist+1)return pD2(c,p1,p2);
-    return 'M'+x1+','+y1+' C'+(x1+dx*.5)+','+y1+' '+(x2-dx*.5)+','+y2+' '+(x2-dx/len*dist)+','+(y2-dy/len*dist);
-  }
-  const len=Math.hypot(dx,dy);if(len<dist+1)return pD2(c,p1,p2);
-  return 'M'+x1+','+y1+' L'+(x2-dx/len*dist)+','+(y2-dy/len*dist);
 }`;
 
   // dur badge renderer
@@ -3006,9 +3026,9 @@ function durLbl(n){
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:#f0efe9;min-height:100vh}
-#cv{position:relative;min-width:100vw;min-height:100vh}
-svg#sl{position:absolute;top:0;left:0;width:5000px;height:3500px;pointer-events:none;z-index:1;overflow:visible}
+body{font-family:system-ui,sans-serif;background:#f0efe9}
+#cv{position:relative;width:${cvW}px;height:${cvH}px}
+svg#sl{position:absolute;top:0;left:0;width:${cvW}px;height:${cvH}px;pointer-events:none;z-index:1;overflow:visible}
 .fn{position:absolute;cursor:pointer;user-select:none;transition:filter .15s,transform .15s}
 .fn:hover{filter:brightness(.96);transform:translateY(-1px)}
 .fn svg.sh{position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none}
@@ -3087,7 +3107,7 @@ svg#sl{position:absolute;top:0;left:0;width:5000px;height:3500px;pointer-events:
 </div></div>
 <script>
 const PAL=${JSON.stringify(PAL)};
-const nodes=${JSON.stringify(nodes)};
+const nodes=${JSON.stringify(exportNodes)};
 const conns=${JSON.stringify(conns)};
 const ICONS=${JSON.stringify(ICONS)};
 ${arrowJS}
@@ -3191,32 +3211,33 @@ window.addEventListener('DOMContentLoaded',()=>{
       const fn=nodes.find(x=>x.id===c.from),tn=nodes.find(x=>x.id===c.to);if(!fn||!tn)return;
       const col=c.color||'#64748b',w=c.weight||2,da=dA(c.dash||'solid');
       const p1=pP(fn,c.fromPort||'right'),p2=pP(tn,c.toPort||'left');
-      const ang=arrAngle(c,p1,p2);
+      const route=buildPath(c,p1,p2);
+      const endAngle=arrivalAngle(c,p1,p2);
+      const startAngle=departureAngle(c,p1,p2)+Math.PI;
       const off=(c.arrowEnd!=='none'&&c.arrowEnd!=='circle'&&c.arrowEnd!=='diamond-end')?w+6:0;
-      const dFull=pD2(c,p1,p2);
-      const dShort=off>0?pD2Short(c,p1,p2,off):dFull;
+      const dShort=off>0?buildShortPath(c,p1,p2,off):route.d;
       const path=document.createElementNS('http://www.w3.org/2000/svg','path');
-      path.setAttribute('d',c.arrowEnd!=='none'?dShort:dFull);
+      path.setAttribute('d',c.arrowEnd!=='none'?dShort:route.d);
       path.setAttribute('fill','none');path.setAttribute('stroke',col);path.setAttribute('stroke-width',w);
+      path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');
       if(da)path.setAttribute('stroke-dasharray',da);
       svg.appendChild(path);
-      if(c.arrowEnd!=='none')drawArrow(svg,c.arrowEnd==='both'?'arrow':c.arrowEnd,p2.x,p2.y,ang,col,w);
-      if(c.arrowEnd==='both')drawArrow(svg,'arrow',p1.x,p1.y,ang+Math.PI,col,w);
+      if(c.arrowEnd!=='none')drawArrow(svg,c.arrowEnd==='both'?'arrow':c.arrowEnd,p2.x,p2.y,endAngle,col,w);
+      if(c.arrowEnd==='both')drawArrow(svg,'arrow',p1.x,p1.y,startAngle,col,w);
       if(c.label){
-        const x1=p1.x,y1=p1.y,x2=p2.x,y2=p2.y;
         let autoX,autoY;
-        if(c.style==='ortho'){
-          const midX=(c.midOffsetX!==undefined)?(x1+c.midOffsetX):(x1+(x2-x1)/2);
-          autoX=(x1+midX)/2; autoY=y1+(y2<=y1?16:-16);
-        }else if(c.style==='step'){
-          const midY=(c.midOffsetY!==undefined)?(y1+c.midOffsetY):(y1+(y2-y1)/2);
-          autoX=x1+(x2>=x1?-20:20); autoY=(y1+midY)/2;
+        if(c.style==='ortho'||c.style==='step'){
+          const lr=getOrthoRoute(c,p1,p2);
+          if(lr.type==='HVH'){autoX=(p1.x+lr.midX)/2;autoY=p1.y+(p2.y<=p1.y?16:-16);}
+          else if(lr.type==='VHV'){autoX=p1.x+(p2.x>=p1.x?-20:20);autoY=(p1.y+lr.midY)/2;}
+          else if(lr.type==='HV'){autoX=(p1.x+p2.x)/2;autoY=p1.y+(p2.y<=p1.y?16:-16);}
+          else{autoX=p1.x+(p2.x>=p1.x?-20:20);autoY=(p1.y+p2.y)/2;}
         }else{
-          autoX=x1+(x2-x1)*.25; autoY=y1+(y2-y1)*.25;
-          const dl=Math.hypot(x2-x1,y2-y1)||1;
-          autoX+=(-(y2-y1)/dl)*20; autoY+=((x2-x1)/dl)*20;
+          autoX=p1.x+(p2.x-p1.x)*.25;autoY=p1.y+(p2.y-p1.y)*.25;
+          const dl=Math.hypot(p2.x-p1.x,p2.y-p1.y)||1;
+          autoX+=-(p2.y-p1.y)/dl*20;autoY+=(p2.x-p1.x)/dl*20;
         }
-        const lx=autoX+(c.labelOffsetX||0), ly=autoY+(c.labelOffsetY||0);
+        const lx=autoX+(c.labelOffsetX||0),ly=autoY+(c.labelOffsetY||0);
         const pw=Math.max(32,c.label.length*6.8+20),ph=20;
         const bg=document.createElementNS('http://www.w3.org/2000/svg','rect');
         bg.setAttribute('x',lx-pw/2);bg.setAttribute('y',ly-ph/2);
@@ -3225,7 +3246,8 @@ window.addEventListener('DOMContentLoaded',()=>{
         bg.setAttribute('filter','drop-shadow(0 1px 3px rgba(0,0,0,0.12))');svg.appendChild(bg);
         const tx=document.createElementNS('http://www.w3.org/2000/svg','text');
         tx.setAttribute('x',lx);tx.setAttribute('y',ly);tx.setAttribute('text-anchor','middle');
-        tx.setAttribute('dominant-baseline','central');tx.setAttribute('font-family','system-ui,sans-serif');
+        tx.setAttribute('dominant-baseline','central');
+        tx.setAttribute('font-family',"'DM Sans',system-ui,sans-serif");
         tx.setAttribute('font-size','11');tx.setAttribute('font-weight','600');tx.setAttribute('fill',col);
         tx.textContent=c.label;svg.appendChild(tx);
       }
