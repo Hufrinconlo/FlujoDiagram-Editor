@@ -541,7 +541,6 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
 .proj-act-btn.del { color:#dc2626; border-color:transparent; }
 .proj-act-btn.del:hover { background:#fef2f2; border-color:#fecaca; }
 </style>
-<script src="https://apis.google.com/js/api.js"></script>
 </head>
 <body>
 
@@ -962,6 +961,7 @@ const PAL = {
   red:    {fill:'#ffc7ce',stroke:'#9c0006',text:'#9c0006',light:'#ffdde0'},
   pink:   {fill:'#f4b8c1',stroke:'#8e3152',text:'#5e0025',light:'#fad7de'},
   gray:   {fill:'#d9d9d9',stroke:'#767676',text:'#262626',light:'#f2f2f2'},
+  slate:  {fill:'#cbd5e1',stroke:'#475569',text:'#1e293b',light:'#e2e8f0'},
   dark:   {fill:'#44546a',stroke:'#1f3864',text:'#ffffff',light:'#5a6e84'},
 };
 const SDEFS = {rect:{w:160,h:60},diamond:{w:170,h:90},circle:{w:160,h:50},cylinder:{w:150,h:84},parallelogram:{w:160,h:60},hexagon:{w:160,h:70},'anno-text':{w:160,h:44},'anno-rect':{w:220,h:160},'anno-ellipse':{w:200,h:140}};
@@ -1253,7 +1253,7 @@ function buildShape(s,w,h,c) {
     // Decisión: rombo limpio con vértices bien definidos
     case 'diamond': return `<polygon points="${w/2},2 ${w-2},${h/2} ${w/2},${h-2} 2,${h/2}" fill="${f}" stroke="${st}" stroke-width="1.5"/>`;
     // Inicio/Fin: cápsula ovalada (stadium shape)
-    case 'circle': { const rx=Math.min(w/2-1,h/2-1); return `<rect x="1" y="1" width="${w-2}" height="${h-2}" rx="${h/2-1}" ry="${h/2-1}" fill="${f}" stroke="${st}" stroke-width="1.5"/>`; }
+    case 'circle': return `<rect x="1" y="1" width="${w-2}" height="${h-2}" rx="${h/2-1}" ry="${h/2-1}" fill="${f}" stroke="${st}" stroke-width="1.5"/>`;
     // Base de datos: cilindro técnico
     case 'cylinder': { const rx=w/2-2,ry=Math.min(10,h*0.15); return `<rect x="2" y="${ry}" width="${w-4}" height="${h-ry*2}" fill="${f}" stroke="${st}" stroke-width="1.5"/><ellipse cx="${w/2}" cy="${ry}" rx="${rx}" ry="${ry}" fill="${l}" stroke="${st}" stroke-width="1.5"/><ellipse cx="${w/2}" cy="${h-ry}" rx="${rx}" ry="${ry}" fill="${f}" stroke="${st}" stroke-width="1.5"/>`; }
     // Entrada/Salida: paralelogramo clásico
@@ -1360,12 +1360,14 @@ function addNormativa() {
   n.normativa.push(val);
   inp.value='';
   renderNormativaList(n);
+  autoSave(); snapshot();
 }
 
 function removeNormativa(i) {
   const n=nodes.find(x=>x.id===selNode); if(!n)return;
   n.normativa.splice(i,1);
   renderNormativaList(n);
+  autoSave(); snapshot();
 }
 
 // Allow Enter key in normativa input
@@ -1557,35 +1559,6 @@ function measureStr(text, fontFamily, fontSize, fontWeight) {
   return _tw.offsetWidth;
 }
 
-function autoWidthNode(n) {
-  if (!n) return;
-  // Área and Óvalo are manual-sized containers — skip
-  if (n.shape === 'anno-rect' || n.shape === 'anno-ellipse') return;
-
-  const ff = n.fontFamily || "'DM Sans', sans-serif";
-  const fs = n.fontSize   || 12.5;
-
-  const titleW = measureStr(n.title || '', ff, fs,            '600');
-  const subW   = measureStr(n.sub   || '', ff, Math.max(8.5, fs - 2), '400');
-  const textW  = Math.max(titleW, subW);
-
-  // Shapes where the text area is narrower than the node width
-  const shapeFactor = { diamond: 0.54, hexagon: 0.64, parallelogram: 0.72 };
-  const factor = shapeFactor[n.shape] || 1.0;
-  const PAD    = 24; // horizontal breathing room inside the shape
-
-  const needed = Math.ceil(textW / factor) + PAD;
-  const minW   = (SDEFS[n.shape] || { w: 100 }).w;
-  const newW   = Math.max(minW, needed);
-
-  if (newW === n.w) return;
-  n.w = newW;
-  const el = document.getElementById(n.id);
-  if (el) el.style.width = newW + 'px';
-  const wInp = document.getElementById('p-width');
-  if (wInp && selNode === n.id) wInp.value = newW;
-  redrawAll();
-}
 
 function changeNodeShape(shape) {
   const n=nodes.find(x=>x.id===selNode); if(!n||n.shape===shape)return;
@@ -1604,7 +1577,7 @@ function updateDuration() {
   const val=parseFloat(document.getElementById('p-dur-val').value)||0;
   const unit=document.getElementById('p-dur-unit').value;
   n.durVal=val; n.durUnit=unit;
-  renderNode(n); updateStatus();
+  renderNode(n); updateStatus(); autoSave(); snapshot();
 }
 
 function updateFontProp() {
@@ -1986,11 +1959,6 @@ function dashArray(d) {
 // Arrowheads are drawn as inline SVG elements (no marker-end url() references)
 // so they work correctly when the file is opened locally (file://)
 
-function getEndPoint(p1, p2, style, c, fn, tn) {
-  // Returns the actual tip point for arrowhead at the end of the path
-  // For straight lines it's p2; for ortho/step the last segment endpoint
-  return p2; // p2 is already the port position on the target node boundary
-}
 
 function curvedCPs(c, p1, p2) {
   const dx = p2.x - p1.x;
@@ -2650,10 +2618,6 @@ function renderInfoRich(text, container) {
   if(!text){mo.innerHTML='<span class="minfo-plain">(Sin información registrada)</span>';return;}
   const lines=text.split('\n');
   // Regex to detect lines starting with an emoji from our set
-  const emojiRe = new RegExp('^('+ICON_LIST.map(e=>{
-    // escape for regex
-    return e.replace(/[\u200d\ufe0f]/g,'\\u200d?\\ufe0f?').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-  }).join('|')+')\\s*');
   lines.forEach((line,i)=>{
     if(!line.trim()&&i>0){mo.appendChild(document.createElement('br'));return;}
     const match=line.match(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})\s*/u);
@@ -3554,7 +3518,7 @@ let gdAccessToken = null;
   const token = hash.get('access_token');
   if (token && hash.get('state') === 'gd_auth') {
     sessionStorage.setItem('gd_token', token);
-    history.replaceState(null, '', window.location.pathname + window.location.search);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
   gdAccessToken = sessionStorage.getItem('gd_token') || null;
 })();
@@ -3578,7 +3542,6 @@ function openDriveModal() {
   document.getElementById('gdrive-modal-bg').classList.add('open');
   const { clientId } = gdCreds();
   if (!clientId) {
-    document.getElementById('gd-client-id-inp').value = clientId;
     gdPanel('gd-setup');
   } else if (!gdAccessToken) {
     gdPanel('gd-signin');
@@ -3695,14 +3658,25 @@ async function driveLoadFile(fileId, name) {
     const resp = await gdFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
     const data = await resp.json();
     if (!data.nodes || !data.conns) throw new Error('Formato de archivo inválido');
-    snapshot();
     nodes.length = 0; conns.length = 0;
     data.nodes.forEach(n => nodes.push(n));
-    data.conns.forEach(c => conns.push(c));
+    data.conns.forEach(c => {
+      // migrate old midOffset → midOffsetX/Y
+      if (c.midOffset !== undefined && c.midOffsetX === undefined) {
+        c.midOffsetX = c.midOffset; c.midOffsetY = 0; delete c.midOffset;
+      }
+      conns.push(c);
+    });
     document.getElementById('canvas').querySelectorAll('.fnode').forEach(el => el.remove());
     nodes.forEach(n => { const num = parseInt(n.id.slice(1)); if (num > nid) nid = num; renderNode(n); });
+    conns.forEach(c => { const num = parseInt(c.id.slice(1)); if (num > cid) cid = num; });
+    if (data.nid) nid = Math.max(nid, data.nid);
+    if (data.cid) cid = Math.max(cid, data.cid);
     selNode = null; selConn = null;
+    currentProjectId = null; currentProjectName = name || 'Sin título';
+    updateProjBadge();
     redrawAll(); updateStatus(); autoSave();
+    snapshot();
     gdStatus('✓ ' + name + ' cargado');
     setTimeout(closeDriveModal, 900);
   } catch (e) { gdStatus('Error: ' + e.message, true); }
