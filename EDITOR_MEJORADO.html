@@ -456,6 +456,90 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
 .gd-file-date { font-size:11px; color:var(--text3); white-space:nowrap; }
 .gd-status { font-size:12px; color:var(--text2); padding:8px 0; text-align:center; }
 .gd-drive-connected { display:flex; align-items:center; gap:6px; font-size:12px; color:#059669; font-weight:500; }
+
+/* Project name badge in toolbar */
+.proj-name-wrap { display:flex; align-items:center; max-width:160px; }
+.proj-name-badge {
+  font-size:12px; font-weight:500; color:var(--text2);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  padding:2px 6px; border-radius:4px; cursor:pointer;
+  transition:background .12s; border:1px solid transparent;
+}
+.proj-name-badge:hover { background:var(--bg); border-color:var(--border); color:var(--text); }
+
+/* Projects modal */
+#proj-modal-bg {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.45);
+  z-index:300; align-items:center; justify-content:center;
+}
+#proj-modal-bg.open { display:flex; }
+#proj-modal {
+  background:#fff; border-radius:14px; width:500px; max-width:95vw;
+  max-height:85vh; display:flex; flex-direction:column;
+  border:1px solid var(--border); box-shadow:0 8px 32px rgba(0,0,0,.18);
+  overflow:hidden; position:relative;
+}
+#proj-modal-hd {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:18px 20px 14px; border-bottom:1px solid var(--border);
+  font-size:15px; font-weight:600; flex-shrink:0;
+}
+#proj-modal-hd button {
+  background:var(--bg); border:1px solid var(--border); border-radius:6px;
+  width:27px; height:27px; cursor:pointer; font-size:13px; color:var(--text2);
+  display:flex; align-items:center; justify-content:center;
+}
+#proj-modal-hd button:hover { background:var(--border); }
+.proj-modal-toolbar {
+  display:flex; align-items:center; gap:8px;
+  padding:12px 20px; border-bottom:1px solid var(--border); flex-shrink:0;
+}
+.proj-save-btn {
+  display:flex; align-items:center; gap:6px;
+  padding:7px 14px; border-radius:7px; font-family:'DM Sans',sans-serif;
+  font-size:12.5px; font-weight:500; cursor:pointer; border:none;
+  background:#1a1917; color:#fff; transition:background .12s; white-space:nowrap;
+}
+.proj-save-btn:hover { background:#333; }
+.proj-save-btn svg { width:13px; height:13px; }
+.proj-name-inp {
+  flex:1; padding:7px 10px; border:1px solid var(--border); border-radius:7px;
+  font-family:'DM Sans',sans-serif; font-size:12.5px; color:var(--text);
+  background:var(--bg); outline:none; transition:border-color .12s;
+}
+.proj-name-inp:focus { border-color:var(--accent); background:#fff; }
+#proj-list { overflow-y:auto; flex:1; padding:8px 12px; }
+.proj-empty {
+  text-align:center; padding:40px 20px; color:var(--text3);
+  font-size:13px; line-height:1.7;
+}
+.proj-item {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 10px; border-radius:8px; cursor:default;
+  border:1px solid transparent; margin-bottom:4px; transition:background .1s;
+}
+.proj-item:hover { background:var(--bg); border-color:var(--border); }
+.proj-item.current { background:var(--accent-bg); border-color:var(--accent); }
+.proj-item-icon { font-size:20px; flex-shrink:0; }
+.proj-item-body { flex:1; min-width:0; }
+.proj-item-name {
+  font-size:13px; font-weight:600; color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  cursor:pointer; border-radius:3px; padding:1px 3px; margin:-1px -3px;
+}
+.proj-item-name:hover { background:var(--border2); }
+.proj-item-meta { font-size:11px; color:var(--text3); margin-top:1px; }
+.proj-item-actions { display:flex; gap:4px; flex-shrink:0; }
+.proj-act-btn {
+  padding:5px 10px; border-radius:6px; font-family:'DM Sans',sans-serif;
+  font-size:11.5px; font-weight:500; cursor:pointer; border:1px solid var(--border);
+  background:none; color:var(--text2); transition:all .1s;
+}
+.proj-act-btn:hover { background:var(--bg); color:var(--text); }
+.proj-act-btn.open { background:#1a1917; color:#fff; border-color:#1a1917; }
+.proj-act-btn.open:hover { background:#333; }
+.proj-act-btn.del { color:#dc2626; border-color:transparent; }
+.proj-act-btn.del:hover { background:#fef2f2; border-color:#fecaca; }
 </style>
 <script src="https://apis.google.com/js/api.js"></script>
 </head>
@@ -464,47 +548,34 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
 <div id="topbar">
   <div class="logo">⬡ FlujoDiagram</div>
   <div class="tb-sep"></div>
-  <button class="tb-btn" id="btn-undo" onclick="undo()" disabled title="Deshacer (Ctrl+Z)" style="opacity:.4">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg>
-    Deshacer
-  </button>
-  <button class="tb-btn" id="btn-redo" onclick="redo()" disabled title="Rehacer (Ctrl+Y / Ctrl+Shift+Z)" style="opacity:.4">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
-    Rehacer
-  </button>
-  <div class="tb-sep"></div>
-  <button class="tb-btn" id="btn-connect" onclick="toggleConnectMode()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M14 7l5 5-5 5"/></svg>
-    Conectar
-  </button>
-  <button class="tb-btn" id="btn-sel-all" onclick="selectAll()" title="Seleccionar todas las figuras (Ctrl+A)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-    Seleccionar todo
-  </button>
-  <button class="tb-btn danger" id="btn-del-sel" onclick="deleteSelected()" style="display:none">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
-    Eliminar
-  </button>
-  <div class="spacer"></div>
-  <button class="tb-btn" onclick="clearAll()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6l-1 14H6L5 6"/></svg>
-    Limpiar
-  </button>
-  <button class="tb-btn" onclick="openDriveModal()" id="btn-drive" title="Guardar/abrir desde Google Drive">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M22 12.5L16.5 3h-9L2 12.5l5.5 9.5h9L22 12.5z"/><path d="M2 12.5h20M7.5 3L12 12.5 16.5 3"/></svg>
-    Drive
-  </button>
-  <div class="tb-sep"></div>
-  <button class="tb-btn" onclick="loadProject()" title="Abrir proyecto guardado (.json)">
+
+  <!-- Project manager -->
+  <button class="tb-btn" onclick="openProjectsModal()" title="Administrar proyectos guardados">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+    Proyectos
+  </button>
+  <div class="proj-name-wrap">
+    <span class="proj-name-badge" id="proj-name-badge" onclick="promptRenameCurrentProject()" title="Renombrar proyecto">Sin título</span>
+  </div>
+  <button class="tb-btn" onclick="newProject()" title="Nuevo diagrama en blanco">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+    Nuevo
+  </button>
+  <div class="tb-sep"></div>
+
+  <!-- File I/O -->
+  <button class="tb-btn" onclick="loadProject()" title="Abrir diagrama desde archivo .json">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
     Abrir
   </button>
-  <button class="tb-btn" onclick="saveProject()" title="Guardar proyecto como archivo .json">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-    Guardar
+  <button class="tb-btn" onclick="saveProject()" title="Descargar diagrama como archivo .json">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Exportar JSON
   </button>
   <input type="file" id="file-input" accept=".json" style="display:none" onchange="onFileSelected(event)">
   <div class="tb-sep"></div>
+
+  <!-- Export image/html -->
   <div class="export-wrap" id="export-wrap">
     <button class="tb-btn primary" onclick="toggleExportMenu()" title="Opciones de exportación">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
@@ -524,6 +595,42 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
       </button>
     </div>
   </div>
+
+  <div class="spacer"></div>
+
+  <!-- Canvas tools -->
+  <button class="tb-btn" id="btn-connect" onclick="toggleConnectMode()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M14 7l5 5-5 5"/></svg>
+    Conectar
+  </button>
+  <button class="tb-btn" id="btn-sel-all" onclick="selectAll()" title="Seleccionar todas las figuras (Ctrl+A)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    Seleccionar todo
+  </button>
+  <button class="tb-btn danger" id="btn-del-sel" onclick="deleteSelected()" style="display:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+    Eliminar
+  </button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" onclick="clearAll()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6l-1 14H6L5 6"/></svg>
+    Limpiar
+  </button>
+  <button class="tb-btn" onclick="openDriveModal()" id="btn-drive" title="Guardar/abrir desde Google Drive">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M22 12.5L16.5 3h-9L2 12.5l5.5 9.5h9L22 12.5z"/><path d="M2 12.5h20M7.5 3L12 12.5 16.5 3"/></svg>
+    Drive
+  </button>
+  <div class="tb-sep"></div>
+
+  <!-- Undo / Redo at far right -->
+  <button class="tb-btn" id="btn-undo" onclick="undo()" disabled title="Deshacer (Ctrl+Z)" style="opacity:.4">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg>
+    Deshacer
+  </button>
+  <button class="tb-btn" id="btn-redo" onclick="redo()" disabled title="Rehacer (Ctrl+Y / Ctrl+Shift+Z)" style="opacity:.4">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
+    Rehacer
+  </button>
 </div>
 
 <div id="main">
@@ -2724,6 +2831,16 @@ function autoSave() {
     try {
       const data = { nodes, conns, nid, cid, v: 1, ts: Date.now() };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      // Also keep current project in sync
+      if (currentProjectId) {
+        try {
+          const pdata = { ...data, name: currentProjectName };
+          localStorage.setItem('flujodiagram_proj_' + currentProjectId, JSON.stringify(pdata));
+          const list = getProjectsMeta();
+          const p = list.find(x => x.id === currentProjectId);
+          if (p) { p.ts = Date.now(); p.nodeCount = nodes.length; p.connCount = conns.length; saveProjectsMeta(list); }
+        } catch {}
+      }
       const now = new Date();
       const hm = now.toLocaleTimeString('es', {hour:'2-digit',minute:'2-digit'});
       setSaveStatus('\u2713 Guardado a las ' + hm, '#059669');
@@ -2805,6 +2922,9 @@ function onFileSelected(evt) {
       const data = JSON.parse(e.target.result);
       if (!data.nodes) throw new Error('Formato inv\u00e1lido');
       if (nodes.length && !confirm('Se reemplazar\u00e1 el diagrama actual. \u00bfContinuar?')) return;
+      currentProjectId = null;
+      currentProjectName = data.name || 'Sin t\u00edtulo';
+      updateProjBadge();
       restoreState(data);
       autoSave();
     } catch(err) {
@@ -3253,6 +3373,178 @@ function escH(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/
   a.href=URL.createObjectURL(b);a.download='flujograma.html';a.click();
 }
 
+// ── PROJECT MANAGER ──
+const PROJECTS_KEY = 'flujodiagram_projects';
+let currentProjectId   = null;
+let currentProjectName = 'Sin título';
+
+function genProjectId() {
+  return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function getProjectsMeta() {
+  try { return JSON.parse(localStorage.getItem(PROJECTS_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveProjectsMeta(list) {
+  localStorage.setItem(PROJECTS_KEY, JSON.stringify(list));
+}
+
+function updateProjBadge() {
+  const el = document.getElementById('proj-name-badge');
+  if (el) el.textContent = currentProjectName;
+}
+
+function writeProjectToStorage(id, name) {
+  const data = { nodes, conns, nid, cid, v: 1, ts: Date.now(), name };
+  try { localStorage.setItem('flujodiagram_proj_' + id, JSON.stringify(data)); }
+  catch(e) { alert('No se pudo guardar: ' + (e.message || e)); return false; }
+  const list = getProjectsMeta().filter(p => p.id !== id);
+  list.unshift({ id, name, ts: Date.now(), nodeCount: nodes.length, connCount: conns.length });
+  saveProjectsMeta(list);
+  return true;
+}
+
+function saveToProjects() {
+  const nameInp = document.getElementById('proj-save-name');
+  const typedName = nameInp ? nameInp.value.trim() : '';
+  const name = typedName || currentProjectName || 'Sin título';
+
+  if (!currentProjectId) currentProjectId = genProjectId();
+  currentProjectName = name;
+  updateProjBadge();
+  if (nameInp) nameInp.value = '';
+
+  if (writeProjectToStorage(currentProjectId, name)) {
+    renderProjectsList();
+    setStatus('Proyecto guardado: ' + name);
+  }
+}
+
+function openProjectById(id) {
+  const raw = localStorage.getItem('flujodiagram_proj_' + id);
+  if (!raw) { alert('No se encontró el proyecto.'); return; }
+  try {
+    const data = JSON.parse(raw);
+    if (nodes.length && !confirm('Se reemplazará el diagrama actual. ¿Continuar?')) return;
+    restoreState(data);
+    currentProjectId   = id;
+    currentProjectName = data.name || 'Sin título';
+    updateProjBadge();
+    autoSave();
+    closeProjectsModal();
+    snapshot();
+    setStatus('Proyecto abierto: ' + currentProjectName);
+  } catch(e) { alert('No se pudo abrir el proyecto.'); }
+}
+
+function deleteProject(id) {
+  if (!confirm('¿Eliminar este proyecto? Esta acción no se puede deshacer.')) return;
+  localStorage.removeItem('flujodiagram_proj_' + id);
+  saveProjectsMeta(getProjectsMeta().filter(p => p.id !== id));
+  if (currentProjectId === id) { currentProjectId = null; updateProjBadge(); }
+  renderProjectsList();
+}
+
+function renameProject(id) {
+  const list = getProjectsMeta();
+  const proj = list.find(p => p.id === id); if (!proj) return;
+  const newName = prompt('Nuevo nombre:', proj.name);
+  if (!newName || !newName.trim()) return;
+  proj.name = newName.trim();
+  saveProjectsMeta(list);
+  // Also update the stored project data
+  try {
+    const raw = localStorage.getItem('flujodiagram_proj_' + id);
+    if (raw) {
+      const data = JSON.parse(raw);
+      data.name = proj.name;
+      localStorage.setItem('flujodiagram_proj_' + id, JSON.stringify(data));
+    }
+  } catch {}
+  if (currentProjectId === id) { currentProjectName = proj.name; updateProjBadge(); }
+  renderProjectsList();
+}
+
+function promptRenameCurrentProject() {
+  const newName = prompt('Nombre del proyecto:', currentProjectName);
+  if (!newName || !newName.trim()) return;
+  currentProjectName = newName.trim();
+  updateProjBadge();
+  if (currentProjectId) {
+    const list = getProjectsMeta();
+    const p = list.find(x => x.id === currentProjectId);
+    if (p) { p.name = currentProjectName; saveProjectsMeta(list); }
+    try {
+      const raw = localStorage.getItem('flujodiagram_proj_' + currentProjectId);
+      if (raw) { const d = JSON.parse(raw); d.name = currentProjectName; localStorage.setItem('flujodiagram_proj_' + currentProjectId, JSON.stringify(d)); }
+    } catch {}
+  }
+}
+
+function newProject() {
+  if (nodes.length && !confirm('¿Crear un nuevo diagrama? El actual no guardado se perderá.')) return;
+  nodes.forEach(n => { const el = document.getElementById(n.id); if(el) el.remove(); });
+  nodes = []; conns = []; nid = 0; cid = 0;
+  selNode = null; selConn = null; multiSel.clear();
+  currentProjectId   = null;
+  currentProjectName = 'Sin título';
+  updateProjBadge();
+  redrawAll(); updateStatus();
+  history = []; historyIndex = -1;
+  snapshot();
+  setStatus('Nuevo diagrama creado');
+}
+
+function timeAgo(ts) {
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 1)  return 'hace un momento';
+  if (mins < 60) return 'hace ' + mins + ' min';
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24)  return 'hace ' + hrs + 'h';
+  return 'hace ' + Math.round(hrs / 24) + 'd';
+}
+
+function renderProjectsList() {
+  const container = document.getElementById('proj-list');
+  if (!container) return;
+  const list = getProjectsMeta();
+  if (!list.length) {
+    container.innerHTML = '<div class="proj-empty">No hay proyectos guardados.<br>Usa <b>Guardar actual</b> para crear uno.</div>';
+    return;
+  }
+  container.innerHTML = list.map(p => `
+    <div class="proj-item${p.id === currentProjectId ? ' current' : ''}">
+      <div class="proj-item-icon">📋</div>
+      <div class="proj-item-body">
+        <div class="proj-item-name" onclick="renameProject('${p.id}')" title="Clic para renombrar">${escProjName(p.name)}</div>
+        <div class="proj-item-meta">${timeAgo(p.ts)} · ${p.nodeCount} figura${p.nodeCount!==1?'s':''} · ${p.connCount} conexión${p.connCount!==1?'es':''}</div>
+      </div>
+      <div class="proj-item-actions">
+        <button class="proj-act-btn open" onclick="openProjectById('${p.id}')">Abrir</button>
+        <button class="proj-act-btn del" onclick="deleteProject('${p.id}')">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function escProjName(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function openProjectsModal() {
+  // Pre-fill name input with current project name if it has one
+  const inp = document.getElementById('proj-save-name');
+  if (inp) inp.value = '';
+  renderProjectsList();
+  document.getElementById('proj-modal-bg').classList.add('open');
+}
+
+function closeProjectsModal() {
+  document.getElementById('proj-modal-bg').classList.remove('open');
+}
+
 // ── GOOGLE DRIVE INTEGRATION ──
 let gdAccessToken = null;
 
@@ -3416,6 +3708,24 @@ async function driveLoadFile(fileId, name) {
   } catch (e) { gdStatus('Error: ' + e.message, true); }
 }
 </script>
+<!-- ── PROJECTS MODAL ── -->
+<div id="proj-modal-bg" onclick="if(event.target===this)closeProjectsModal()">
+  <div id="proj-modal">
+    <div id="proj-modal-hd">
+      <span>Proyectos guardados</span>
+      <button onclick="closeProjectsModal()">✕</button>
+    </div>
+    <div class="proj-modal-toolbar">
+      <button class="proj-save-btn" onclick="saveToProjects()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Guardar actual
+      </button>
+      <input class="proj-name-inp" id="proj-save-name" placeholder="Nombre del proyecto…">
+    </div>
+    <div id="proj-list"></div>
+  </div>
+</div>
+
 <!-- GOOGLE DRIVE MODAL -->
 <div id="gdrive-modal-bg" onclick="if(event.target===this)closeDriveModal()">
   <div id="gdrive-modal">
