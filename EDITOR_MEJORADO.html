@@ -43,6 +43,8 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 .tb-btn.danger:hover { background: #fee2e2; }
 .tb-btn.primary { background: #1a1917; color: #fff; border-color: #1a1917; }
 .tb-btn.primary:hover { background: #333; }
+.tb-btn.icon-only { padding: 5px 6px; }
+.tb-btn.icon-only svg { width: 15px; height: 15px; }
 .spacer { flex: 1; }
 .tb-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
 .export-wrap { position: relative; }
@@ -556,6 +558,10 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
   <div class="proj-name-wrap">
     <span class="proj-name-badge" id="proj-name-badge" onclick="promptRenameCurrentProject()" title="Renombrar proyecto">Sin título</span>
   </div>
+  <button class="tb-btn" id="btn-save-proj" onclick="quickSaveProject()" title="Guardar proyecto (Ctrl+S)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+    Guardar
+  </button>
   <button class="tb-btn" onclick="newProject()" title="Nuevo diagrama en blanco">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
     Nuevo
@@ -610,6 +616,16 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
     Eliminar
   </button>
+  <div id="btn-align-group" style="display:none;align-items:center;gap:2px">
+    <div class="tb-sep" style="margin:0 4px"></div>
+    <button class="tb-btn icon-only" onclick="alignNodes('left')"    title="Alinear borde izquierdo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="4" x2="4" y2="20"/><rect x="6"  y="7"  width="10" height="4" rx="1"/><rect x="6"  y="13" width="14" height="4" rx="1"/></svg></button>
+    <button class="tb-btn icon-only" onclick="alignNodes('centerH')" title="Centrar horizontalmente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="4" x2="12" y2="20"/><rect x="5"  y="7"  width="14" height="4" rx="1"/><rect x="7"  y="13" width="10" height="4" rx="1"/></svg></button>
+    <button class="tb-btn icon-only" onclick="alignNodes('right')"   title="Alinear borde derecho"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="20" y1="4" x2="20" y2="20"/><rect x="8"  y="7"  width="10" height="4" rx="1"/><rect x="4"  y="13" width="14" height="4" rx="1"/></svg></button>
+    <div style="width:1px;height:16px;background:var(--border);margin:0 2px"></div>
+    <button class="tb-btn icon-only" onclick="alignNodes('top')"     title="Alinear borde superior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="4" x2="20" y2="4"/><rect x="7"  y="6"  width="4" height="10" rx="1"/><rect x="13" y="6"  width="4" height="14" rx="1"/></svg></button>
+    <button class="tb-btn icon-only" onclick="alignNodes('centerV')" title="Centrar verticalmente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="12" x2="20" y2="12"/><rect x="7"  y="5"  width="4" height="14" rx="1"/><rect x="13" y="7"  width="4" height="10" rx="1"/></svg></button>
+    <button class="tb-btn icon-only" onclick="alignNodes('bottom')"  title="Alinear borde inferior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="20" y2="20"/><rect x="7"  y="8"  width="4" height="10" rx="1"/><rect x="13" y="4"  width="4" height="14" rx="1"/></svg></button>
+  </div>
   <div class="tb-sep"></div>
   <button class="tb-btn" onclick="clearAll()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6l-1 14H6L5 6"/></svg>
@@ -1372,6 +1388,15 @@ function removeNormativa(i) {
 
 // Allow Enter key in normativa input
 document.addEventListener('DOMContentLoaded',()=>{
+  // Restore current project identity before loading diagram
+  try {
+    const cp = JSON.parse(localStorage.getItem(CURRENT_PROJ_KEY));
+    if (cp && cp.id) {
+      currentProjectId   = cp.id;
+      currentProjectName = cp.name || 'Sin título';
+      updateProjBadge();
+    }
+  } catch {}
   setTimeout(()=>{
     loadAutoSave();
     // Push initial empty state so undo can go back to blank canvas
@@ -1500,14 +1525,43 @@ function finishLasso(e) {
 // ── MULTI-SELECT UI UPDATE ──
 function updateMultiSelUI() {
   const count = multiSel.size;
-  const delBtn = document.getElementById('btn-del-sel');
+  const delBtn   = document.getElementById('btn-del-sel');
+  const alignGrp = document.getElementById('btn-align-group');
   if(count > 1) {
     delBtn.style.display='';
     delBtn.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M3 6h18M19 6l-1 14H6L5 6"/></svg> Eliminar ${count} figuras`;
+    alignGrp.style.display='flex';
     setStatus(`${count} figuras seleccionadas — arrastra cualquiera para moverlas todas`);
   } else if(count===0 && !selNode) {
     delBtn.style.display='none';
+    alignGrp.style.display='none';
   }
+}
+
+function alignNodes(mode) {
+  const ids = [...multiSel];
+  if (ids.length < 2) return;
+  const sel = ids.map(id => nodes.find(n => n.id === id)).filter(Boolean);
+
+  const minX  = Math.min(...sel.map(n => n.x));
+  const maxX  = Math.max(...sel.map(n => n.x + n.w));
+  const minY  = Math.min(...sel.map(n => n.y));
+  const maxY  = Math.max(...sel.map(n => n.y + n.h));
+  const midX  = (minX + maxX) / 2;
+  const midY  = (minY + maxY) / 2;
+
+  sel.forEach(n => {
+    if      (mode === 'left')    n.x = minX;
+    else if (mode === 'centerH') n.x = midX - n.w / 2;
+    else if (mode === 'right')   n.x = maxX - n.w;
+    else if (mode === 'top')     n.y = minY;
+    else if (mode === 'centerV') n.y = midY - n.h / 2;
+    else if (mode === 'bottom')  n.y = maxY - n.h;
+    const el = document.getElementById(n.id);
+    if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; }
+  });
+
+  redrawAll(); autoSave(); snapshot();
 }
 
 // ── SELECT ALL ──
@@ -2746,6 +2800,7 @@ document.addEventListener('keydown',e=>{
     else if(selConn)deleteSelectedConn();
   }
   const mod = e.ctrlKey||e.metaKey;
+  if(mod && e.key.toLowerCase()==='s' && !inInput){ e.preventDefault(); quickSaveProject(); }
   if(mod && e.key.toLowerCase()==='z' && !e.shiftKey && !inInput){ e.preventDefault(); undo(); }
   if(mod && (e.key.toLowerCase()==='y' || (e.key.toLowerCase()==='z' && e.shiftKey)) && !inInput){ e.preventDefault(); redo(); }
   if(mod && e.key.toLowerCase()==='a' && !inInput){ e.preventDefault(); selectAll(); }
@@ -2786,14 +2841,15 @@ document.getElementById('canvas').addEventListener('dblclick',e=>{
 function clearAll(){if(!confirm('¿Eliminar todo?'))return;nodes.forEach(n=>{const el=document.getElementById(n.id);if(el)el.remove();});nodes=[];conns=[];selNode=null;selConn=null;redrawAll();updateStatus();autoSave();snapshot();}
 
 // ── AUTOSAVE ──
-const SAVE_KEY = 'flujodiagram_autosave';
+const SAVE_KEY         = 'flujodiagram_autosave';
+const CURRENT_PROJ_KEY = 'flujodiagram_current_proj';
 let autoSaveTimer = null;
 
 function autoSave() {
   clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(() => {
     try {
-      const data = { nodes, conns, nid, cid, v: 1, ts: Date.now() };
+      const data = { nodes, conns, nid, cid, v: 1, ts: Date.now(), projectId: currentProjectId, projectName: currentProjectName };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
       // Also keep current project in sync
       if (currentProjectId) {
@@ -2851,6 +2907,14 @@ function restoreState(data) {
     }
   });
   selNode = null; selConn = null;
+  if (data.projectId) {
+    currentProjectId   = data.projectId;
+    currentProjectName = data.projectName || 'Sin t\u00edtulo';
+  } else {
+    currentProjectId   = null;
+    currentProjectName = 'Sin t\u00edtulo';
+  }
+  updateProjBadge();
   nodes.forEach(n => renderNode(n));
   redrawAll();
   updateStatus();
@@ -3355,6 +3419,14 @@ function saveProjectsMeta(list) {
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(list));
 }
 
+function persistCurrentProject() {
+  if (currentProjectId) {
+    localStorage.setItem(CURRENT_PROJ_KEY, JSON.stringify({ id: currentProjectId, name: currentProjectName }));
+  } else {
+    localStorage.removeItem(CURRENT_PROJ_KEY);
+  }
+}
+
 function updateProjBadge() {
   const el = document.getElementById('proj-name-badge');
   if (el) el.textContent = currentProjectName;
@@ -3381,6 +3453,7 @@ function saveToProjects() {
   if (nameInp) nameInp.value = '';
 
   if (writeProjectToStorage(currentProjectId, name)) {
+    persistCurrentProject();
     renderProjectsList();
     setStatus('Proyecto guardado: ' + name);
   }
@@ -3396,6 +3469,7 @@ function openProjectById(id) {
     currentProjectId   = id;
     currentProjectName = data.name || 'Sin título';
     updateProjBadge();
+    persistCurrentProject();
     autoSave();
     closeProjectsModal();
     snapshot();
@@ -3407,7 +3481,7 @@ function deleteProject(id) {
   if (!confirm('¿Eliminar este proyecto? Esta acción no se puede deshacer.')) return;
   localStorage.removeItem('flujodiagram_proj_' + id);
   saveProjectsMeta(getProjectsMeta().filter(p => p.id !== id));
-  if (currentProjectId === id) { currentProjectId = null; updateProjBadge(); }
+  if (currentProjectId === id) { currentProjectId = null; updateProjBadge(); persistCurrentProject(); }
   renderProjectsList();
 }
 
@@ -3427,7 +3501,7 @@ function renameProject(id) {
       localStorage.setItem('flujodiagram_proj_' + id, JSON.stringify(data));
     }
   } catch {}
-  if (currentProjectId === id) { currentProjectName = proj.name; updateProjBadge(); }
+  if (currentProjectId === id) { currentProjectName = proj.name; updateProjBadge(); persistCurrentProject(); }
   renderProjectsList();
 }
 
@@ -3436,6 +3510,7 @@ function promptRenameCurrentProject() {
   if (!newName || !newName.trim()) return;
   currentProjectName = newName.trim();
   updateProjBadge();
+  persistCurrentProject();
   if (currentProjectId) {
     const list = getProjectsMeta();
     const p = list.find(x => x.id === currentProjectId);
@@ -3455,6 +3530,7 @@ function newProject() {
   currentProjectId   = null;
   currentProjectName = 'Sin título';
   updateProjBadge();
+  persistCurrentProject();
   redrawAll(); updateStatus();
   history = []; historyIndex = -1;
   snapshot();
@@ -3495,6 +3571,18 @@ function renderProjectsList() {
 
 function escProjName(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function quickSaveProject() {
+  if (!nodes.length) { setStatus('Agrega figuras antes de guardar.'); return; }
+  if (currentProjectId) {
+    writeProjectToStorage(currentProjectId, currentProjectName);
+    setStatus('Guardado: ' + currentProjectName);
+  } else {
+    openProjectsModal();
+    const inp = document.getElementById('proj-save-name');
+    if (inp) inp.focus();
+  }
 }
 
 function openProjectsModal() {
