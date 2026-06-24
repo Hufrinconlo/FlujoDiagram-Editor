@@ -973,7 +973,6 @@ function updateUndoRedoUI() {
 
 // ── ADD NODE ──
 function addNode(shape) {
-  snapshot();
   const id='n'+(++nid);
   const wrap=document.getElementById('canvas-wrap');
   const cx=(wrap.scrollLeft+wrap.clientWidth/2)/zoom;
@@ -984,6 +983,7 @@ function addNode(shape) {
   renderNode(n);
   selectNode(n.id);
   updateStatus();
+  snapshot();
 }
 
 function shapeName(s){return {rect:'Proceso',diamond:'Decisión',circle:'Inicio/Fin',cylinder:'Base de datos',parallelogram:'Entrada/Salida',hexagon:'Preparación','anno-text':'Texto','anno-rect':'Área','anno-ellipse':'Óvalo'}[s]||s;}
@@ -1274,20 +1274,18 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 function updateSize() {
   const n=nodes.find(x=>x.id===selNode); if(!n)return;
-  snapshot();
   const w=parseInt(document.getElementById('p-width').value)||n.w;
   const h=parseInt(document.getElementById('p-height').value)||n.h;
   n.w=Math.max(60,w); n.h=Math.max(40,h);
   renderNode(n); redrawAll(); updateStatus();
+  snapshot();
 }
 
 // ── RESIZE ──
 let resizeData=null;
-let resizeSnapped=false;
 function startResize(e,id,dir) {
   e.stopPropagation(); e.preventDefault();
   const n=nodes.find(x=>x.id===id); if(!n)return;
-  resizeSnapped=false;
   resizeData={id,dir,sx:e.clientX,sy:e.clientY,ox:n.x,oy:n.y,ow:n.w,oh:n.h};
 }
 document.addEventListener('mousemove', e=>{
@@ -1295,7 +1293,6 @@ document.addEventListener('mousemove', e=>{
     const n=nodes.find(x=>x.id===resizeData.id); if(!n)return;
     const dx=(e.clientX-resizeData.sx)/zoom;
     const dy=(e.clientY-resizeData.sy)/zoom;
-    if(!resizeSnapped && (Math.abs(dx)>2||Math.abs(dy)>2)){resizeSnapped=true;snapshot();}
     const d=resizeData.dir;
     let nx=resizeData.ox,ny=resizeData.oy,nw=resizeData.ow,nh=resizeData.oh;
     if(d.includes('e')) nw=Math.max(60,resizeData.ow+dx);
@@ -1312,7 +1309,7 @@ document.addEventListener('mousemove', e=>{
   }
 }, true);
 document.addEventListener('mouseup', ()=>{
-  if(resizeData){resizeData=null; updateStatus();}
+  if(resizeData){resizeData=null; updateStatus(); snapshot(); autoSave();}
 }, true);
 
 function canvasClicked(e) {
@@ -1485,11 +1482,11 @@ function autoWidthNode(n) {
 
 function changeNodeShape(shape) {
   const n=nodes.find(x=>x.id===selNode); if(!n||n.shape===shape)return;
-  snapshot();
   n.shape=shape;
   renderNode(n);
   redrawAll();
   autoSave();
+  snapshot();
   document.querySelectorAll('#change-shape-grid .shape-btn').forEach(btn=>{
     btn.classList.toggle('active', btn.id.replace('csg-','')===shape);
   });
@@ -1583,14 +1580,13 @@ function setNodeColor(c) {
   activeNodeColor=c;
   document.querySelectorAll('#node-color-row .cdot').forEach(d=>d.classList.toggle('sel',d.dataset.c===c));
   const n=nodes.find(x=>x.id===selNode); if(!n)return;
-  snapshot();
   n.color=c; renderNode(n);
+  snapshot();
 }
 
 // ── DELETE ──
 function deleteSelected() {
   if(multiSel.size > 1) {
-    snapshot();
     const ids = [...multiSel];
     ids.forEach(id => {
       nodes = nodes.filter(n=>n.id!==id);
@@ -1601,37 +1597,35 @@ function deleteSelected() {
     document.getElementById('no-sel').style.display='';
     document.getElementById('props-form').style.display='none';
     document.getElementById('btn-del-sel').style.display='none';
-    redrawAll(); updateStatus(); autoSave(); return;
+    redrawAll(); updateStatus(); autoSave(); snapshot(); return;
   }
   if(selNode) deleteNodeById(selNode);
   else if(selConn) deleteSelectedConn();
 }
 function deleteNodeById(id) {
-  snapshot();
   nodes=nodes.filter(n=>n.id!==id);
   conns=conns.filter(c=>c.from!==id&&c.to!==id);
   const el=document.getElementById(id); if(el)el.remove();
   if(selNode===id){selNode=null;document.getElementById('no-sel').style.display='';document.getElementById('props-form').style.display='none';}
   redrawAll(); updateStatus();
   document.getElementById('btn-del-sel').style.display='none';
+  snapshot();
 }
 function deleteSelectedConn() {
   if(!selConn)return;
-  snapshot();
   conns=conns.filter(c=>c.id!==selConn);
   selConn=null;
   document.getElementById('del-conn-btn').style.display='none';
   document.getElementById('conn-hint').style.display='';
   document.getElementById('conn-label-inp').value='';
   redrawAll(); updateStatus();
+  snapshot();
 }
 
 // ── DRAG ──
-let dragSnapped = false; // true once the drag exceeds the threshold and we've taken a snapshot
 function startDrag(e,id) {
   if(connFrom) return;
   const n=nodes.find(x=>x.id===id); if(!n)return;
-  dragSnapped = false;
   // If dragging a node that's part of a multi-selection, move all selected nodes
   const isMulti = multiSel.size > 0 && multiSel.has(id);
   if(isMulti) {
@@ -1678,11 +1672,6 @@ document.addEventListener('mousemove', e=>{
   if(dragData){
     const dx = (e.clientX - dragData.sx) / zoom;
     const dy = (e.clientY - dragData.sy) / zoom;
-    // Take undo snapshot only on first real movement (>3px threshold)
-    if(!dragSnapped && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
-      dragSnapped = true;
-      snapshot();
-    }
     if(dragData.multi) {
       // Move all selected nodes
       multiSel.forEach(nid => {
@@ -1713,7 +1702,6 @@ document.addEventListener('mouseup', e=>{
     const isClick = Math.hypot(e.clientX - g.startX, e.clientY - g.startY) < 5;
     const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if(isClick || over){
-      snapshot();
       const id='n'+(++nid);
       const d = SDEFS[g.shape];
       let x, y;
@@ -1730,11 +1718,12 @@ document.addEventListener('mouseup', e=>{
       selectNode(n.id);
       updateStatus();
       autoSave();
+      snapshot();
     }
     return;
   }
   if(panData){ panData=null; document.getElementById('canvas-wrap').style.cursor=''; }
-  if(dragData){dragData=null; autoSave();}
+  if(dragData){dragData=null; snapshot(); autoSave();}
   if(lassoData){finishLasso(e); lassoData=null;}
 });
 
@@ -1757,7 +1746,6 @@ function startConn(e, nid, dir) {
 
 function finishConn(toId, toDir) {
   if(!connFrom||connFrom===toId)return;
-  snapshot();
   const id='c'+(++cid);
   conns.push({
     id, from:connFrom, fromPort:connFromPort,
@@ -1768,6 +1756,7 @@ function finishConn(toId, toDir) {
   });
   cancelConn();
   redrawAll(); updateStatus();
+  snapshot();
 }
 
 function cancelConn() {
@@ -1846,32 +1835,35 @@ document.getElementById('canvas').addEventListener('mouseup', e=>{
 function setLineStyle(v) {
   defLineStyle=v;
   document.querySelectorAll('.line-btn[data-ls]').forEach(b=>b.classList.toggle('sel',b.dataset.ls===v));
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.style=v; delete c.midOffsetX; delete c.midOffsetY; redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.style=v; delete c.midOffsetX; delete c.midOffsetY; redrawAll(); snapshot();}}
 }
 function setLineDash(v) {
   defLineDash=v;
   document.querySelectorAll('.line-btn[data-ld]').forEach(b=>b.classList.toggle('sel',b.dataset.ld===v));
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.dash=v;redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.dash=v;redrawAll();snapshot();}}
 }
 function setArrowEnd(v) {
   defArrowEnd=v;
   document.querySelectorAll('.arrow-btn[data-ae]').forEach(b=>b.classList.toggle('sel',b.dataset.ae===v));
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.arrowEnd=v;redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.arrowEnd=v;redrawAll();snapshot();}}
 }
 function setLineColor(hex,key) {
   defLineColor=hex;
   document.querySelectorAll('#line-color-row .cdot').forEach(d=>d.classList.toggle('sel',d.dataset.lc===key));
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.color=hex;redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.color=hex;redrawAll();snapshot();}}
 }
 function setLineWeight(v) {
   defLineWeight=parseFloat(v);
   document.getElementById('lw-val').textContent=v+'px';
-  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){snapshot();c.weight=parseFloat(v);redrawAll();}}
+  if(selConn){const c=conns.find(x=>x.id===selConn);if(c){c.weight=parseFloat(v);redrawAll();snapshot();}}
 }
+let _connLabelTimer = null;
 function updateConnLabel(v) {
   if(!selConn)return;
   const c=conns.find(x=>x.id===selConn); if(!c)return;
-  c.label=v; redrawAll();
+  c.label=v; redrawAll(); autoSave();
+  clearTimeout(_connLabelTimer);
+  _connLabelTimer = setTimeout(snapshot, 800);
 }
 
 function dashArray(d) {
@@ -2362,7 +2354,7 @@ document.addEventListener('mousemove', e=>{
 });
 
 document.addEventListener('mouseup', ()=>{
-  if(midDragData){ midDragData=null; autoSave(); }
+  if(midDragData){ midDragData=null; snapshot(); autoSave(); }
 });
 
 // ── LABEL INLINE EDIT ──
@@ -2402,10 +2394,11 @@ function startLabelEdit(connId, lx, ly, pillW, pillH) {
   const commit = () => {
     if (done) return; done = true;
     const val = input.value.trim();
-    if (val !== (c.label || '')) snapshot();
+    const changed = val !== (c.label || '');
     c.label = val;
     input.remove();
     redrawAll(); autoSave();
+    if (changed) snapshot();
   };
 
   const centerX = sx;
@@ -2463,8 +2456,7 @@ document.addEventListener('mousemove', e=>{
 document.addEventListener('mouseup', ()=>{
   if(labelDragData){
     labelDragData=null;
-    autoSave();
-    // Show reset button now that label has been moved
+    snapshot(); autoSave();
     const rl=document.getElementById('reset-label-btn'); if(rl) rl.style.display='';
   }
 });
@@ -2514,9 +2506,8 @@ function selectConn(id) {
 function resetMidOffset() {
   if(!selConn) return;
   const c=conns.find(x=>x.id===selConn); if(!c)return;
-  snapshot();
   delete c.midOffsetX; delete c.midOffsetY;
-  redrawAll(); autoSave();
+  redrawAll(); autoSave(); snapshot();
   document.getElementById('reset-mid-btn').textContent='⊕ Arrastra el handle para ajustar la línea';
 }
 
@@ -2645,7 +2636,6 @@ function copySelected() {
 
 function pasteClipboard() {
   if(!clipboard || !clipboard.length) return;
-  snapshot();
   const offset = 28;
   const idMap = {};
   const pasted = clipboard.map(src => {
@@ -2666,6 +2656,7 @@ function pasteClipboard() {
   updateStatus();
   // Shift clipboard so repeated pastes cascade nicely
   clipboard = pasted.map(n => JSON.parse(JSON.stringify(n)));
+  snapshot();
 }
 
 function duplicateSelected() {
@@ -2700,7 +2691,6 @@ document.addEventListener('keydown',e=>{
     const ids = multiSel.size > 1 ? [...multiSel] : (selNode ? [selNode] : []);
     if(!ids.length) return;
     e.preventDefault();
-    snapshot();
     const dx = e.key==='ArrowLeft' ? -NUDGE_STEP : e.key==='ArrowRight' ? NUDGE_STEP : 0;
     const dy = e.key==='ArrowUp'   ? -NUDGE_STEP : e.key==='ArrowDown'  ? NUDGE_STEP : 0;
     ids.forEach(id => {
@@ -2710,6 +2700,7 @@ document.addEventListener('keydown',e=>{
       renderNode(n);
     });
     redrawAll();
+    snapshot();
     autoSave();
   }
 });
@@ -2721,7 +2712,7 @@ document.getElementById('canvas').addEventListener('dblclick',e=>{
 });
 
 // ── MISC ──
-function clearAll(){if(!confirm('¿Eliminar todo?'))return;snapshot();nodes.forEach(n=>{const el=document.getElementById(n.id);if(el)el.remove();});nodes=[];conns=[];selNode=null;selConn=null;redrawAll();updateStatus();autoSave();}
+function clearAll(){if(!confirm('¿Eliminar todo?'))return;nodes.forEach(n=>{const el=document.getElementById(n.id);if(el)el.remove();});nodes=[];conns=[];selNode=null;selConn=null;redrawAll();updateStatus();autoSave();snapshot();}
 
 // ── AUTOSAVE ──
 const SAVE_KEY = 'flujodiagram_autosave';
@@ -2782,7 +2773,7 @@ function restoreState(data) {
   nodes.forEach(n => renderNode(n));
   redrawAll();
   updateStatus();
-  snapshot(); updateUndoRedoUI();
+  updateUndoRedoUI();
   const ts = data.ts ? new Date(data.ts).toLocaleString('es') : '\u2014';
   setSaveStatus('Restaurado: ' + ts, '#2563eb');
 }

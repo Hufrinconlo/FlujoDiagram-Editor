@@ -41,4 +41,3 @@ Abre `EDITOR_MEJORADO.html` directamente en el navegador. No requiere instalaci�
 - Añadir: Snap lines/figuras to 90, 0, 180, 270 angles
 - Arreglar la queue de deshacer/rehacer.
 - Añadir: Algo que maneje los estados de guardado o algo.
-- Añadir: Una forma de exportar los archivos en png u otro formato que permita interactuar.
