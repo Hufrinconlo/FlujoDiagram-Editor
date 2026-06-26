@@ -1881,12 +1881,18 @@ function startConn(e, nid, dir) {
 function finishConn(toId, toDir) {
   if(!connFrom||connFrom===toId)return;
   const id='c'+(++cid);
+  const fromNode = nodes.find(n=>n.id===connFrom);
+  let autoLabel = '';
+  if (fromNode && fromNode.shape === 'diamond') {
+    const existing = conns.filter(c=>c.from===connFrom).length;
+    autoLabel = existing === 0 ? 'Sí' : existing === 1 ? 'No' : '';
+  }
   conns.push({
     id, from:connFrom, fromPort:connFromPort,
     to:toId, toPort:toDir,
     style:defLineStyle, dash:defLineDash,
     arrowEnd:defArrowEnd, color:defLineColor,
-    weight:defLineWeight, label:''
+    weight:defLineWeight, label:autoLabel
   });
   cancelConn();
   redrawAll(); updateStatus();
