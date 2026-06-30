@@ -39,3 +39,4 @@ Abre `EDITOR_MEJORADO.html` directamente en el navegador. No requiere instalaci√
 
 - Remover: Click derecho + hold abre el menu si se suelta sobre la interfaz. (windows)
 - A√±adir: Snap lines/figuras to 90, 0, 180, 270 angles
+- Fix: siempre poner las figuras on top cuando se exporta el html
