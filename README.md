@@ -38,5 +38,7 @@ Abre `EDITOR_MEJORADO.html` directamente en el navegador. No requiere instalaci√
 **2 do list:**
 
 - Remover: Click derecho + hold abre el menu si se suelta sobre la interfaz. (windows)
-- A√±adir: Snap lines/figuras to 90, 0, 180, 270 angles
-- Fix: siempre poner las figuras on top cuando se exporta el html
+- mirar los colores de el fondo y la letra.
+- cambiar el color de la letra a negro.
+- poner los bordes del html exportado curvos, igual que el editor
+- el html exportado que salga con el nombre del proyecto guardado.

@@ -971,14 +971,14 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
 <script>
 // ── PALETTE ──
 const PAL = {
-  blue:   {fill:'#b8cce4',stroke:'#4472a8',text:'#17375e',light:'#dce6f1'},
-  violet: {fill:'#ccc0da',stroke:'#7460ac',text:'#3a3057',light:'#e2dced'},
-  green:  {fill:'#c6efce',stroke:'#376523',text:'#375623',light:'#ebf5eb'},
-  amber:  {fill:'#ffeb9c',stroke:'#9c7a00',text:'#7d6000',light:'#fff5cc'},
-  red:    {fill:'#ffc7ce',stroke:'#9c0006',text:'#9c0006',light:'#ffdde0'},
-  pink:   {fill:'#f4b8c1',stroke:'#8e3152',text:'#5e0025',light:'#fad7de'},
-  gray:   {fill:'#d9d9d9',stroke:'#767676',text:'#262626',light:'#f2f2f2'},
-  slate:  {fill:'#cbd5e1',stroke:'#475569',text:'#1e293b',light:'#e2e8f0'},
+  blue:   {fill:'#b8cce4',stroke:'#4472a8',text:'#111111',light:'#dce6f1'},
+  violet: {fill:'#ccc0da',stroke:'#7460ac',text:'#111111',light:'#e2dced'},
+  green:  {fill:'#c6efce',stroke:'#376523',text:'#111111',light:'#ebf5eb'},
+  amber:  {fill:'#ffeb9c',stroke:'#9c7a00',text:'#111111',light:'#fff5cc'},
+  red:    {fill:'#ffc7ce',stroke:'#9c0006',text:'#111111',light:'#ffdde0'},
+  pink:   {fill:'#f4b8c1',stroke:'#8e3152',text:'#111111',light:'#fad7de'},
+  gray:   {fill:'#d9d9d9',stroke:'#767676',text:'#111111',light:'#f2f2f2'},
+  slate:  {fill:'#cbd5e1',stroke:'#475569',text:'#111111',light:'#e2e8f0'},
   dark:   {fill:'#44546a',stroke:'#1f3864',text:'#ffffff',light:'#5a6e84'},
 };
 const SDEFS = {rect:{w:160,h:60},diamond:{w:170,h:90},circle:{w:160,h:50},cylinder:{w:150,h:84},parallelogram:{w:160,h:60},hexagon:{w:160,h:70},'anno-text':{w:160,h:44},'anno-rect':{w:220,h:160},'anno-ellipse':{w:200,h:140}};
@@ -3172,11 +3172,13 @@ function durLbl(n){
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:#f0efe9}
-#cv{position:relative;width:${cvW}px;height:${cvH}px}
+body{font-family:system-ui,sans-serif;background:#f0efe9;overflow:hidden;width:100vw;height:100vh}
+#wrap{width:100vw;height:100vh;overflow:hidden;position:relative;cursor:grab}
+#wrap.panning{cursor:grabbing}
+#cv{position:relative;width:${cvW}px;height:${cvH}px;transform-origin:0 0;will-change:transform}
 svg#sl{position:absolute;top:0;left:0;width:${cvW}px;height:${cvH}px;pointer-events:none;z-index:1;overflow:visible}
-.fn{position:absolute;cursor:pointer;user-select:none;transition:filter .15s,transform .15s;z-index:2}
-.fn:hover{filter:brightness(.96);transform:translateY(-1px)}
+.fn{position:absolute;cursor:pointer;user-select:none;transition:filter .15s;z-index:2}
+.fn:hover{filter:brightness(.96)}
 .fn svg.sh{position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none}
 .fn .lw{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 12px;pointer-events:none}
 .fn[data-shape="diamond"] .lw{padding:16% 22%}
@@ -3277,7 +3279,7 @@ svg#sl{position:absolute;top:0;left:0;width:${cvW}px;height:${cvH}px;pointer-eve
   <div id="tip-info"></div>
   <div id="tip-cta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>Doble clic para ver más</div>
 </div>
-<div id="cv"><svg id="sl"></svg></div>
+<div id="wrap"><div id="cv"><svg id="sl"></svg></div></div>
 <div class="mb" id="mb" onclick="if(event.target===this)cm()">
 <div class="mo">
   <button class="mc" onclick="cm()">✕</button>
@@ -3427,7 +3429,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     const ff2=n.fontFamily||"'DM Sans',sans-serif";
     const subFs2=Math.max(7,fs2-2);
     el.innerHTML='<svg class="sh">'+bS(n.shape,n.w,n.h,c)+'</svg><div class="lw"><div class="nt" style="color:'+c.text+';font-size:'+fs2+'px;font-family:'+ff2+'">'+escH(n.title||'')+'</div>'+(n.sub?'<div class="ns" style="color:'+c.text+';font-size:'+subFs2+'px;font-family:'+ff2+'">'+escH(n.sub)+'</div>':'')+'</div>'+badge;
-    el.addEventListener('click',()=>om(n));
+    el.addEventListener('click',()=>{ if(window._didPan&&window._didPan()) return; om(n); });
     el.addEventListener('mouseenter',e=>showTip(n,e));
     el.addEventListener('mousemove',e=>{if(tip.classList.contains('show'))positionTip(e);});
     el.addEventListener('mouseleave',hideTip);
@@ -3482,6 +3484,59 @@ window.addEventListener('DOMContentLoaded',()=>{
   },80);
 });
 function escH(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// ── PAN & ZOOM ──
+(function(){
+  const wrap=document.getElementById('wrap');
+  const cv=document.getElementById('cv');
+  const W=${cvW}, H=${cvH};
+  let scale=1, ox=0, oy=0;
+  let panning=false, didPan=false, startX=0, startY=0, startOx=0, startOy=0;
+
+  function applyT(){ cv.style.transform='translate('+ox+'px,'+oy+'px) scale('+scale+')'; }
+
+  function fitToWindow(){
+    const pad=60;
+    scale=Math.min((window.innerWidth-pad*2)/W,(window.innerHeight-pad*2)/H,1);
+    ox=(window.innerWidth-W*scale)/2;
+    oy=(window.innerHeight-H*scale)/2;
+    applyT();
+  }
+  fitToWindow();
+  window.addEventListener('resize',fitToWindow);
+
+  wrap.addEventListener('wheel',function(e){
+    e.preventDefault();
+    const factor=e.deltaY<0?1.12:1/1.12;
+    const newScale=Math.min(5,Math.max(0.1,scale*factor));
+    ox=e.clientX-(e.clientX-ox)*(newScale/scale);
+    oy=e.clientY-(e.clientY-oy)*(newScale/scale);
+    scale=newScale;
+    applyT();
+  },{passive:false});
+
+  wrap.addEventListener('mousedown',function(e){
+    if(e.button!==0)return;
+    panning=true; didPan=false;
+    startX=e.clientX; startY=e.clientY;
+    startOx=ox; startOy=oy;
+    wrap.classList.add('panning');
+  });
+  window.addEventListener('mousemove',function(e){
+    if(!panning)return;
+    const dx=e.clientX-startX, dy=e.clientY-startY;
+    if(Math.abs(dx)>4||Math.abs(dy)>4) didPan=true;
+    ox=startOx+dx; oy=startOy+dy;
+    applyT();
+  });
+  window.addEventListener('mouseup',function(e){
+    if(e.button!==0)return;
+    panning=false;
+    wrap.classList.remove('panning');
+  });
+
+  window._didPan=function(){ return didPan; };
+})();
 <\/script></body></html>`;
 
   const b=new Blob([html],{type:'text/html'});
