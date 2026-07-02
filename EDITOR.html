@@ -68,6 +68,50 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 /* MAIN */
 #main { display: flex; flex: 1; overflow: hidden; }
 
+/* PROJECT INFO PANEL */
+#proj-panel {
+  width: 0; overflow: hidden; flex-shrink: 0;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  transition: width .22s cubic-bezier(.4,0,.2,1);
+}
+#proj-panel.open { width: 280px; }
+#proj-panel-inner { width: 280px; display: flex; flex-direction: column; height: 100%; overflow-y: auto; }
+#proj-panel-hd {
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--text3); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+#proj-panel-hd button {
+  background: none; border: none; cursor: pointer; color: var(--text3);
+  font-size: 14px; line-height: 1; padding: 2px 4px; border-radius: 4px;
+}
+#proj-panel-hd button:hover { background: var(--border); color: var(--text); }
+.pp-field { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.pp-field label { display: block; font-size: 10.5px; font-weight: 600; color: var(--text2); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .06em; }
+.pp-field input, .pp-field textarea {
+  width: 100%; font-family: 'DM Sans', sans-serif; font-size: 12.5px;
+  color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 9px; resize: none; outline: none;
+  transition: border-color .12s;
+}
+.pp-field input:focus, .pp-field textarea:focus { border-color: var(--accent); background: #fff; }
+.pp-field textarea { height: 90px; line-height: 1.55; }
+.pp-field textarea.tall { height: 130px; }
+#proj-panel-toggle {
+  position: absolute; z-index: 20;
+  writing-mode: vertical-lr; transform: rotate(180deg);
+  left: -1px; top: 50%; margin-top: -48px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-right: none; border-radius: 0 6px 6px 0;
+  padding: 10px 5px; font-size: 10.5px; font-weight: 600;
+  color: var(--text3); cursor: pointer; letter-spacing: .06em;
+  transition: color .12s, background .12s; white-space: nowrap;
+}
+#proj-panel-toggle:hover { color: var(--text); background: var(--bg); }
+#canvas-wrap { position: relative; }
+
 /* SIDEBAR */
 #sidebar {
   width: var(--sb); background: var(--surface); border-right: 1px solid var(--border);
@@ -913,8 +957,35 @@ body.connecting .fnode .port { opacity: 1; cursor: crosshair; }
     </div>
   </div>
 
+  <!-- PROJECT INFO PANEL -->
+  <div id="proj-panel">
+    <div id="proj-panel-inner">
+      <div id="proj-panel-hd">
+        Info del proyecto
+        <button onclick="toggleProjPanel()" title="Cerrar">✕</button>
+      </div>
+      <div class="pp-field">
+        <label>Descripción</label>
+        <textarea class="tall" id="pp-desc" placeholder="¿De qué trata este proceso? Describe el objetivo principal…" oninput="updateProjMeta()"></textarea>
+      </div>
+      <div class="pp-field">
+        <label>Responsable</label>
+        <input id="pp-owner" type="text" placeholder="Nombre o área responsable" oninput="updateProjMeta()">
+      </div>
+      <div class="pp-field">
+        <label>Versión</label>
+        <input id="pp-version" type="text" placeholder="Ej: v1.0, 2024-A…" oninput="updateProjMeta()">
+      </div>
+      <div class="pp-field">
+        <label>Notas adicionales</label>
+        <textarea id="pp-notes" placeholder="Observaciones, pendientes, contexto extra…" oninput="updateProjMeta()"></textarea>
+      </div>
+    </div>
+  </div>
+
   <!-- CANVAS -->
   <div id="canvas-wrap">
+    <button id="proj-panel-toggle" onclick="toggleProjPanel()" title="Información del proyecto">Proyecto</button>
     <div id="canvas-sizer">
       <div id="canvas">
         <div id="lasso"></div>
@@ -2856,7 +2927,7 @@ function autoSave() {
   clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(() => {
     try {
-      const data = { nodes, conns, nid, cid, v: 1, ts: Date.now(), projectId: currentProjectId, projectName: currentProjectName };
+      const data = { nodes, conns, nid, cid, v: 1, ts: Date.now(), projectId: currentProjectId, projectName: currentProjectName, projMeta };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
       // Also keep current project in sync
       if (currentProjectId) {
@@ -2922,6 +2993,7 @@ function restoreState(data) {
     currentProjectName = 'Sin t\u00edtulo';
   }
   updateProjBadge();
+  loadProjMeta(data.projMeta || {});
   nodes.forEach(n => renderNode(n));
   redrawAll();
   updateStatus();
@@ -3010,29 +3082,41 @@ async function exportPNG() {
   setStatus('Generando PNG…');
 
   const PAD = 48;
+  const LABEL_H = currentProjectName && currentProjectName !== 'Sin título' ? 36 : 0;
   const minX = Math.max(0, Math.min(...nodes.map(n => n.x)) - PAD);
   const minY = Math.max(0, Math.min(...nodes.map(n => n.y)) - PAD);
   const maxX = Math.max(...nodes.map(n => n.x + n.w)) + PAD;
   const maxY = Math.max(...nodes.map(n => n.y + n.h)) + PAD;
 
+  // Temporarily add project name label to canvas for capture
+  let labelEl = null;
+  if (LABEL_H) {
+    labelEl = document.createElement('div');
+    labelEl.style.cssText = `position:absolute;left:${minX}px;top:${minY}px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;color:#1a1917;opacity:.55;pointer-events:none;white-space:nowrap;line-height:${LABEL_H}px;z-index:999`;
+    labelEl.textContent = currentProjectName;
+    document.getElementById('canvas').appendChild(labelEl);
+  }
+
   const canvasEl = document.getElementById('canvas');
-  // Temporarily neutralise zoom transform so we capture at 1:1 canvas coords
   canvasEl.style.transform = 'scale(1)';
 
   try {
     const result = await html2canvas(canvasEl, {
       x: minX, y: minY,
       width: maxX - minX, height: maxY - minY,
-      scale: 2,           // 2× resolution for sharp output on retina screens
+      scale: 2,
       useCORS: true,
       backgroundColor: '#f7f7f5',
       logging: false,
       imageTimeout: 0
     });
 
+    const safeName = (currentProjectName && currentProjectName !== 'Sin título')
+      ? currentProjectName.replace(/[^a-zA-Z0-9À-ɏ _-]/g, '').trim()
+      : 'flujograma';
     const fecha = new Date().toISOString().slice(0,10);
     const a = document.createElement('a');
-    a.download = `flujograma-${fecha}.png`;
+    a.download = `${safeName}-${fecha}.png`;
     a.href = result.toDataURL('image/png');
     a.click();
     setStatus('PNG exportado');
@@ -3040,6 +3124,7 @@ async function exportPNG() {
     alert('Error al exportar PNG: ' + e.message);
   } finally {
     canvasEl.style.transform = `scale(${zoom})`;
+    if (labelEl) labelEl.remove();
   }
 }
 
@@ -3167,7 +3252,7 @@ function durLbl(n){
   const html=`<!DOCTYPE html>
 <html lang="es"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Flujograma</title>
+<title>${currentProjectName && currentProjectName !== 'Sin título' ? currentProjectName : 'Flujograma'}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -3191,51 +3276,52 @@ svg#sl{position:absolute;top:0;left:0;width:${cvW}px;height:${cvH}px;pointer-eve
   padding:3px 9px;border-radius:20px;white-space:nowrap;pointer-events:none;
   display:flex;align-items:center;gap:4px;z-index:25;box-shadow:0 1px 5px rgba(0,0,0,.25)}
 .db svg{width:11px;height:11px;opacity:.8}
-/* Modal overlay */
-.mb{display:none;position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:100;align-items:center;justify-content:center;padding:24px}
-.mb.open{display:flex}
-.mo{
-  background:#fff;
-  border-radius:0;
-  padding:0;
-  max-width:820px;
-  width:100%;
-  position:relative;
-  border:none;
-  border-top:4px solid #94b43b;
-  max-height:90vh;
-  overflow-y:auto;
-  box-shadow:0 8px 48px rgba(0,0,0,.26);
+/* Sidebar */
+#sb{
+  position:fixed;right:0;top:0;bottom:0;width:360px;
+  background:#fff;border-left:1px solid #e8e8e5;
+  box-shadow:-4px 0 24px rgba(0,0,0,.09);
+  transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+  z-index:90;display:flex;flex-direction:column;
   font-family:'DM Sans',system-ui,sans-serif;
 }
-.mo h2{font-size:22px;font-weight:700;margin:0;padding:28px 32px 5px;color:#111;letter-spacing:-.01em}
-.msb{font-size:11.5px;color:#888;margin:0;padding:0 32px 20px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;border-bottom:1px solid #eee}
-.mc{position:absolute;top:14px;right:16px;background:none;border:1px solid #ddd;border-radius:6px;width:30px;height:30px;cursor:pointer;font-size:15px;color:#aaa;display:flex;align-items:center;justify-content:center}
-.mc:hover{color:#333;background:#f5f5f5}
-.mdur{padding:14px 32px 0}
-.mdur-pill{display:inline-flex;align-items:center;gap:5px;background:#1a1917;color:#fff;font-size:11px;font-weight:600;padding:3px 12px;border-radius:20px}
-.mdur-pill svg{width:10px;height:10px}
-/* Modal sections — same style as editor */
-.msecs{display:flex;flex-direction:column;gap:0;padding-bottom:12px;margin-top:14px}
+#sb.open{transform:translateX(0)}
+#sb-toggle{
+  position:absolute;left:-40px;top:50%;transform:translateY(-50%);
+  background:#fff;border:1px solid #e8e8e5;border-right:none;
+  border-radius:10px 0 0 10px;width:40px;height:52px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:-3px 0 10px rgba(0,0,0,.07);
+}
+#sb-toggle svg{transition:transform .25s;width:16px;height:16px;color:#888}
+#sb.open #sb-toggle svg{transform:rotate(180deg)}
+#sb-hd{padding:22px 22px 16px;border-bottom:1px solid #f0f0f0;flex-shrink:0}
+#sb-type{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94b43b;margin-bottom:6px}
+#sb-title{font-size:30px;font-weight:800;color:#111;line-height:1.15;letter-spacing:-.03em;margin-bottom:4px}
+#sb-sub{font-size:13px;color:#888;margin-bottom:0}
+#sb-dur{display:none;align-items:center;gap:6px;margin-top:10px;font-size:12px;font-weight:600;color:#fff;background:#1a1917;padding:4px 12px;border-radius:20px;width:fit-content}
+#sb-dur svg{width:11px;height:11px;opacity:.8}
+#sb-body{overflow-y:auto;flex:1;padding-bottom:24px}
+#sb-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#ccc;font-size:13px;text-align:center;padding:32px;gap:10px;line-height:1.6}
+#sb-empty svg{width:32px;height:32px;opacity:.3}
+/* Section styles */
 .msec{background:#fff;border-bottom:1px solid #f0f0f0}
 .msec:last-child{border-bottom:none}
 .msec-hd{
   display:flex;align-items:center;
-  padding:14px 32px 10px 29px;
+  padding:14px 22px 10px 19px;
   font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;
-  color:#94b43b;
-  border-left:3px solid #94b43b;
-  background:#fff
+  color:#94b43b;border-left:3px solid #94b43b;background:#fff
 }
 .msec-hd.alt{color:#a61c31;border-left-color:#a61c31}
 .msec-hd.neutral{color:#666;border-left-color:#ccc}
-.msec-bd{padding:10px 32px 18px 32px;font-size:14px;line-height:1.8;color:#222;white-space:pre-wrap}
+.msec-bd{padding:10px 22px 18px 22px;font-size:13.5px;line-height:1.8;color:#222;white-space:pre-wrap}
 .msec-bd.empty{color:#bbb;font-style:italic;font-size:13px}
-.norm-item{display:flex;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:13.5px;color:#333}
+.norm-item{display:flex;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:13px;color:#333}
 .norm-item:last-child{border-bottom:none;padding-bottom:0}
 .norm-item::before{content:'';display:inline-block;width:5px;height:5px;border-radius:50%;background:#a61c31;flex-shrink:0;margin-top:5px}
 /* Rich info lines */
-.iline{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:14px;line-height:1.7}
+.iline{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13.5px;line-height:1.7}
 .iline:last-child{border-bottom:none;padding-bottom:0}
 .iico{font-size:16px;flex-shrink:0;margin-top:2px}
 /* Startup hint toast */
@@ -3267,32 +3353,94 @@ svg#sl{position:absolute;top:0;left:0;width:${cvW}px;height:${cvH}px;pointer-eve
 #tip-info{font-size:12px;color:#666;line-height:1.5;border-top:1px solid #f0f0f0;padding-top:6px;margin-top:2px;display:none}
 #tip-cta{font-size:11px;color:#aaa;margin-top:7px;display:flex;align-items:center;gap:4px}
 #tip-cta svg{width:10px;height:10px;opacity:.6}
+/* Left project sidebar */
+#lsb{
+  position:fixed;left:0;top:0;bottom:0;width:300px;
+  background:#fff;border-right:1px solid #e8e8e5;
+  box-shadow:4px 0 24px rgba(0,0,0,.08);
+  transform:translateX(-100%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+  z-index:90;display:flex;flex-direction:column;
+  font-family:'DM Sans',system-ui,sans-serif;
+}
+#lsb.open{transform:translateX(0)}
+#lsb-toggle{
+  position:absolute;right:-40px;top:50%;transform:translateY(-50%);
+  background:#fff;border:1px solid #e8e8e5;border-left:none;
+  border-radius:0 10px 10px 0;width:40px;height:52px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:3px 0 10px rgba(0,0,0,.07);
+}
+#lsb-toggle svg{transition:transform .25s;width:16px;height:16px;color:#888}
+#lsb.open #lsb-toggle svg{transform:rotate(180deg)}
+#lsb-hd{
+  padding:28px 24px 20px;border-bottom:1px solid #f0f0f0;flex-shrink:0;
+  background:linear-gradient(135deg,#f9f9f7 0%,#fff 100%);
+}
+#lsb-proj-name{
+  font-size:22px;font-weight:800;color:#111;letter-spacing:-.03em;
+  line-height:1.15;margin-bottom:4px;word-break:break-word;
+}
+#lsb-proj-sub{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:#94b43b}
+#lsb-body{overflow-y:auto;flex:1;padding:8px 0 24px}
+.lsb-sec{padding:16px 24px;border-bottom:1px solid #f5f5f3}
+.lsb-sec:last-child{border-bottom:none}
+.lsb-sec-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94b43b;margin-bottom:8px}
+.lsb-sec-lbl.alt{color:#a61c31}
+.lsb-sec-lbl.neutral{color:#888}
+.lsb-sec-val{font-size:13.5px;color:#222;line-height:1.7;white-space:pre-wrap}
+.lsb-sec-empty{font-size:13px;color:#bbb;font-style:italic}
+.lsb-pill{display:inline-flex;align-items:center;gap:6px;background:#f3f3f1;color:#555;font-size:12px;font-weight:500;padding:4px 10px;border-radius:20px}
 </style></head><body>
+<!-- Left project sidebar -->
+<div id="lsb">
+  <button id="lsb-toggle" onclick="toggleLsb()" title="Información del proyecto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+  <div id="lsb-hd">
+    <div id="lsb-proj-sub">Proyecto</div>
+    <div id="lsb-proj-name">${(currentProjectName && currentProjectName !== 'Sin título' ? currentProjectName : 'Sin título').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+  </div>
+  <div id="lsb-body">
+    ${projMeta.desc ? `<div class="lsb-sec"><div class="lsb-sec-lbl">Descripción</div><div class="lsb-sec-val">${projMeta.desc.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>` : ''}
+    ${projMeta.owner ? `<div class="lsb-sec"><div class="lsb-sec-lbl neutral">Responsable</div><div class="lsb-pill">${projMeta.owner.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>` : ''}
+    ${projMeta.version ? `<div class="lsb-sec"><div class="lsb-sec-lbl neutral">Versión</div><div class="lsb-pill">${projMeta.version.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>` : ''}
+    ${projMeta.notes ? `<div class="lsb-sec"><div class="lsb-sec-lbl alt">Notas</div><div class="lsb-sec-val">${projMeta.notes.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>` : ''}
+    ${!projMeta.desc && !projMeta.owner && !projMeta.version && !projMeta.notes ? '<div class="lsb-sec"><span class="lsb-sec-empty">Sin información de proyecto registrada.</span></div>' : ''}
+  </div>
+</div>
 <div id="hint-toast">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
-  Haz doble clic en cualquier figura para ver su información detallada
+  Haz clic en cualquier figura para ver su información detallada
 </div>
 <div id="tip">
   <div id="tip-title"></div>
   <div id="tip-type"></div>
   <div id="tip-dur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span id="tip-dur-txt"></span></div>
   <div id="tip-info"></div>
-  <div id="tip-cta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>Doble clic para ver más</div>
+  <div id="tip-cta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>Clic para ver más</div>
 </div>
 <div id="wrap"><div id="cv"><svg id="sl"></svg></div></div>
-<div class="mb" id="mb" onclick="if(event.target===this)cm()">
-<div class="mo">
-  <button class="mc" onclick="cm()">✕</button>
-  <h2 id="mt2"></h2>
-  <div class="msb" id="ms2"></div>
-  <div class="mdur" id="mdur2" style="display:none">
-    <div class="mdur-pill">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-      <span id="mdur2-txt"></span>
-    </div>
+<div id="sb">
+  <button id="sb-toggle" onclick="toggleSb()" title="Mostrar / ocultar panel">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <div id="sb-empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 15l6 6M10 17A7 7 0 1 0 10 3a7 7 0 0 0 0 14z"/></svg>
+    Haz clic en una figura<br>para ver su información
   </div>
-  <div class="msecs" id="mo2"></div>
-</div></div>
+  <div id="sb-content" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div id="sb-hd">
+      <div id="sb-type"></div>
+      <div id="sb-title"></div>
+      <div id="sb-sub"></div>
+      <div id="sb-dur">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        <span id="sb-dur-txt"></span>
+      </div>
+    </div>
+    <div id="sb-body"></div>
+  </div>
+</div>
 <script>
 const PAL=${JSON.stringify(PAL)};
 const nodes=${JSON.stringify(exportNodes)};
@@ -3353,22 +3501,52 @@ function renderSections(n, container){
     s3.appendChild(b3);container.appendChild(s3);
   }
 }
+// ── Left sidebar (project info) ──
+const lsb=document.getElementById('lsb');
+let lsbOpen=false;
+function toggleLsb(){
+  lsbOpen=!lsbOpen;
+  lsb.classList.toggle('open',lsbOpen);
+}
+// Auto-open if project has content
+(function(){
+  const hasContent=${!!(projMeta.desc||projMeta.owner||projMeta.version||projMeta.notes)||false};
+  if(hasContent){ lsbOpen=true; lsb.classList.add('open'); }
+})();
+
+// ── Right sidebar (node info) ──
+const sb=document.getElementById('sb');
+let sbOpen=false;
+function toggleSb(){
+  sbOpen=!sbOpen;
+  sb.classList.toggle('open',sbOpen);
+}
 function om(n){
   const shapeLabel={rect:'Proceso',diamond:'Decisión',circle:'Inicio / Fin',cylinder:'Base de datos',parallelogram:'Entrada / Salida',hexagon:'Preparación'};
-  document.getElementById('mt2').textContent=n.title||'Sin título';
-  const s=document.getElementById('ms2');
-  const typeStr=shapeLabel[n.shape]||'Elemento';
-  s.textContent=n.sub?typeStr+' · '+n.sub:typeStr;
-  s.style.display='';
+  document.getElementById('sb-type').textContent=shapeLabel[n.shape]||'Elemento';
+  document.getElementById('sb-title').textContent=n.title||'Sin título';
+  const subEl=document.getElementById('sb-sub');
+  subEl.textContent=n.sub||''; subEl.style.display=n.sub?'':'none';
   const dl=durLbl(n);
-  const mdur=document.getElementById('mdur2');
-  if(dl){mdur.style.display='';document.getElementById('mdur2-txt').textContent=dl;}
-  else{mdur.style.display='none';}
-  renderSections(n,document.getElementById('mo2'));
-  document.getElementById('mb').classList.add('open');
+  const durEl=document.getElementById('sb-dur');
+  if(dl){durEl.style.display='flex';document.getElementById('sb-dur-txt').textContent=dl;}
+  else{durEl.style.display='none';}
+  renderSections(n,document.getElementById('sb-body'));
+  document.getElementById('sb-empty').style.display='none';
+  const cnt=document.getElementById('sb-content');
+  cnt.style.display='flex'; cnt.style.flexDirection='column'; cnt.style.flex='1'; cnt.style.overflow='hidden';
+  if(!sbOpen){sbOpen=true;sb.classList.add('open');}
 }
-function cm(){document.getElementById('mb').classList.remove('open');}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')cm();});
+function cm(){
+  document.getElementById('sb-empty').style.display='flex';
+  document.getElementById('sb-content').style.display='none';
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if(sbOpen) toggleSb();
+    else if(lsbOpen) toggleLsb();
+  }
+});
 
 // ── Startup hint toast ──
 window.addEventListener('DOMContentLoaded',()=>{
@@ -3541,10 +3719,34 @@ function escH(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/
 
   const b=new Blob([html],{type:'text/html'});
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(b);a.download='flujograma.html';a.click();
+  const safeName=(currentProjectName&&currentProjectName!=='Sin título')?currentProjectName.replace(/[^a-zA-Z0-9À-ɏ _-]/g,'').trim():'flujograma';
+  a.href=URL.createObjectURL(b);a.download=safeName+'.html';a.click();
 }
 
 // ── PROJECT MANAGER ──
+// ── PROJECT META ──
+let projMeta = { desc: '', owner: '', version: '', notes: '' };
+
+function toggleProjPanel() {
+  document.getElementById('proj-panel').classList.toggle('open');
+}
+
+function updateProjMeta() {
+  projMeta.desc    = document.getElementById('pp-desc').value;
+  projMeta.owner   = document.getElementById('pp-owner').value;
+  projMeta.version = document.getElementById('pp-version').value;
+  projMeta.notes   = document.getElementById('pp-notes').value;
+  autoSave();
+}
+
+function loadProjMeta(meta) {
+  projMeta = { desc: '', owner: '', version: '', notes: '', ...(meta || {}) };
+  document.getElementById('pp-desc').value    = projMeta.desc;
+  document.getElementById('pp-owner').value   = projMeta.owner;
+  document.getElementById('pp-version').value = projMeta.version;
+  document.getElementById('pp-notes').value   = projMeta.notes;
+}
+
 const PROJECTS_KEY = 'flujodiagram_projects';
 let currentProjectId   = null;
 let currentProjectName = 'Sin título';
@@ -3674,6 +3876,7 @@ function newProject() {
   currentProjectName = 'Sin título';
   updateProjBadge();
   persistCurrentProject();
+  loadProjMeta({});
   redrawAll(); updateStatus();
   history = []; historyIndex = -1;
   snapshot();
